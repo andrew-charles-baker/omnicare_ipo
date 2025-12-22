@@ -1,0 +1,212 @@
+---
+title: "Omnicare IPO Data: Summary Statistics"
+author: "Research Team"
+date: today
+format:
+  html:
+    toc: true
+    code-fold: true
+---
+
+## Overview
+
+This document provides summary statistics for the IPO dataset used in analyzing the effect of the Supreme Court's *Omnicare v. Laborers District Council* (2015) decision on firm disclosure behavior.
+
+The Omnicare decision clarified liability standards under Section 11 of the Securities Act for statements of opinion versus statements of fact in registration statements. This created heterogeneous effects across judicial circuits:
+
+- **2nd & 9th Circuits**: Expanded plaintiff avenues (new omission theory)
+- **6th Circuit**: Heightened pleading standards
+
+```{r}
+#| label: setup
+#| message: false
+
+df <- read.csv("../data/omnicare_rf.csv")
+```
+
+## Dataset Overview
+
+```{r}
+#| label: overview
+
+cat("Observations:", nrow(df), "\n")
+cat("Variables:", ncol(df), "\n")
+cat("Date range:", min(df$offer_date), "to", max(df$offer_date), "\n")
+```
+
+## Variable Descriptions
+
+| Variable | Description |
+|----------|-------------|
+| `offer_date` | IPO offer date |
+| `ipo_name` | Company name |
+| `cik` | SEC CIK identifier |
+| `offer_price` | Price per share at offering |
+| `assets_thous` | Firm assets at IPO (thousands) |
+| `total_proceeds_thous` | Amount raised (thousands) |
+| `headquarter` | HQ state (used for circuit assignment) |
+| `industry` | Industry description |
+| `sic_code` | SIC code |
+| `is_high_tech` | High-tech industry indicator |
+| `Internet` | Internet firm indicator |
+| `Founding` | Year founded |
+| `vc_backed` | Venture capital backed |
+| `first_day_price` | Closing price on first trading day |
+| `first_day_return` | First-day return (IPO "pop") |
+| `vwretd` | Value-weighted market return (day of IPO) |
+| `roll_vwretd` | Rolling average VW return (control) |
+| `rf_fact_t07` | BERT-based fact-intensity measure (primary) |
+| `rf_fact_t08` | Fact-intensity (sensitivity) |
+| `rf_fact_t09` | Fact-intensity (sensitivity) |
+
+## Summary Statistics
+
+### Numeric Variables
+
+```{r}
+#| label: summary-stats
+
+numeric_cols <- c("offer_price", "assets_thous", "total_proceeds_thous",
+                  "first_day_price", "first_day_return", "vwretd",
+                  "roll_vwretd", "rf_fact_t07", "rf_fact_t08", "rf_fact_t09")
+summary(df[, numeric_cols])
+```
+
+### First-Day Returns Distribution
+
+```{r}
+#| label: first-day-return-stats
+
+cat("First Day Return Statistics:\n")
+cat("  Min:    ", round(min(df$first_day_return), 4), "\n")
+cat("  Max:    ", round(max(df$first_day_return), 4), "\n")
+cat("  Mean:   ", round(mean(df$first_day_return), 4), "\n")
+cat("  Median: ", round(median(df$first_day_return), 4), "\n")
+cat("  Std Dev:", round(sd(df$first_day_return), 4), "\n")
+```
+
+```{r}
+#| label: first-day-return-histogram
+#| fig-cap: "Distribution of First-Day Returns (winsorized at 200%)"
+
+# Winsorize for visualization
+df$first_day_return_wins <- pmin(df$first_day_return, 2)
+hist(df$first_day_return_wins,
+     breaks = 50,
+     main = "First-Day Returns Distribution",
+     xlab = "First-Day Return (capped at 200%)",
+     col = "steelblue",
+     border = "white")
+abline(v = 0, col = "red", lty = 2, lwd = 2)
+abline(v = median(df$first_day_return), col = "darkgreen", lty = 2, lwd = 2)
+legend("topright",
+       legend = c("Zero", "Median"),
+       col = c("red", "darkgreen"),
+       lty = 2, lwd = 2)
+```
+
+## Extreme First-Day Returns
+
+The following IPOs had first-day returns exceeding 100% or below -50%:
+
+```{r}
+#| label: outliers
+
+outliers <- df[df$first_day_return > 1.0 | df$first_day_return < -0.5,
+               c("offer_date", "ipo_name", "offer_price", "first_day_price", "first_day_return")]
+outliers <- outliers[order(-outliers$first_day_return), ]
+knitr::kable(outliers, row.names = FALSE, digits = 3)
+```
+
+### Verification of Extreme Values
+
+The most extreme first-day returns were verified against public sources:
+
+| Company | IPO Date | Offer Price | First Day Close | Return | Status |
+|---------|----------|-------------|-----------------|--------|--------|
+| Magic Empire Global Ltd | 2022-08-05 | $4.00 | $97.00 | 2,325% | **Verified** — hit $235 intraday |
+| E-Home Household Service | 2021-05-14 | $4.50 | $54.00 | 1,100% | **Verified** |
+| UTime Ltd | 2021-04-06 | $4.00 | $39.00 | 875% | **Verified** — Bloomberg reported 2,600% peak |
+
+These extreme values are **not data errors** — they reflect speculative trading in small-cap Chinese/overseas stocks during 2021-2022.
+
+Sources:
+
+- [IPOScoop: Magic Empire Global](https://www.iposcoop.com/the-ipo-buzz-magic-empire-global-soars-in-its-early-august-debut/)
+- [Bloomberg: UTime IPO](https://www.bloomberg.com/news/articles/2021-04-08/utime-ipo-recalls-dot-com-days-with-early-trading-performance)
+
+## Headquarter Distribution (for Circuit Assignment)
+
+```{r}
+#| label: hq-distribution
+
+hq_table <- sort(table(df$headquarter), decreasing = TRUE)
+print(hq_table)
+```
+
+```{r}
+#| label: hq-barplot
+#| fig-cap: "IPOs by Headquarter State"
+#| fig-height: 6
+
+par(mar = c(5, 6, 4, 2))
+barplot(head(hq_table, 20),
+        horiz = TRUE,
+        las = 1,
+        main = "Top 20 Headquarter Locations",
+        xlab = "Number of IPOs",
+        col = "steelblue",
+        border = "white")
+```
+
+## Fact-Intensity Measure Distribution
+
+```{r}
+#| label: rf-fact-distribution
+#| fig-cap: "Distribution of BERT-based Fact-Intensity Measure (rf_fact_t07)"
+
+hist(df$rf_fact_t07,
+     breaks = 50,
+     main = "Fact-Intensity Distribution (rf_fact_t07)",
+     xlab = "Fact-Intensity Score",
+     col = "coral",
+     border = "white")
+abline(v = mean(df$rf_fact_t07), col = "darkred", lty = 2, lwd = 2)
+abline(v = 0.5, col = "black", lty = 3, lwd = 2)
+legend("topright",
+       legend = c("Mean", "0.5 (neutral)"),
+       col = c("darkred", "black"),
+       lty = c(2, 3), lwd = 2)
+```
+
+## Pre/Post Omnicare Split
+
+The Omnicare decision was issued on **March 24, 2015**.
+
+```{r}
+#| label: pre-post-split
+
+df$post_omnicare <- as.Date(df$offer_date) >= as.Date("2015-03-24")
+
+cat("Pre-Omnicare (before March 24, 2015):", sum(!df$post_omnicare), "\n")
+cat("Post-Omnicare (March 24, 2015 and after):", sum(df$post_omnicare), "\n")
+```
+
+```{r}
+#| label: pre-post-comparison
+
+cat("\nMean First-Day Return:\n")
+cat("  Pre-Omnicare: ", round(mean(df$first_day_return[!df$post_omnicare]), 4), "\n")
+cat("  Post-Omnicare:", round(mean(df$first_day_return[df$post_omnicare]), 4), "\n")
+
+cat("\nMean Fact-Intensity (rf_fact_t07):\n")
+cat("  Pre-Omnicare: ", round(mean(df$rf_fact_t07[!df$post_omnicare]), 4), "\n")
+cat("  Post-Omnicare:", round(mean(df$rf_fact_t07[df$post_omnicare]), 4), "\n")
+```
+
+## Next Steps
+
+1. Create circuit assignment variable based on `headquarter`
+2. Define treatment (2nd/9th circuits) vs. control (6th circuit) groups
+3. Implement difference-in-differences specification
+4. Analyze effect on `rf_fact_t07` (disclosure behavior) and `first_day_return` (market outcomes)
