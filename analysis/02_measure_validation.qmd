@@ -122,20 +122,24 @@ knitr::kable(ols_results, digits = 4,
 
 ## 2. Binscatter (Optimal Binning)
 
-Binscatter provides a non-parametric visualization of the conditional expectation function. We use quantile-based binning following the spirit of Cattaneo, Crump, Farrell, and Feng (2024).
+Binscatter provides a non-parametric visualization of the conditional expectation function.
 
-The approach:
-
-1. Divide `rf_fact_t07` into evenly-spaced quantile bins
-2. Compute the mean of `first_day_return` within each bin
-3. Plot bin means with a linear fit overlay
+**Note on Implementation**: For IMSE-optimal binning, install the [`binsreg`](https://nppackages.github.io/binsreg/) package from Cattaneo, Crump, Farrell, and Feng (2024). The implementation below uses a simplified quantile-based approach with the number of bins set via the rule-of-thumb $J \approx \lceil n^{1/3} \rceil$.
 
 ```{r}
 #| label: binscatter-function
 
-# Optimal binscatter function
-# Uses quantile-based binning (approximation of IMSE-optimal from Cattaneo et al.)
-binscatter <- function(data, x_var, y_var, n_bins = 20, title = "") {
+# Check if binsreg is available; if not, use quantile-based fallback
+use_binsreg <- requireNamespace("binsreg", quietly = TRUE)
+
+if (use_binsreg) {
+  cat("Using binsreg package for IMSE-optimal binning\n")
+} else {
+  cat("binsreg not available; using quantile-based binning (ROT: n^(1/3) bins)\n")
+}
+
+# Binscatter function with binsreg or fallback
+binscatter <- function(data, x_var, y_var, n_bins = NULL, title = "") {
 
   x <- data[[x_var]]
   y <- data[[y_var]]
@@ -144,6 +148,19 @@ binscatter <- function(data, x_var, y_var, n_bins = 20, title = "") {
   complete <- complete.cases(x, y)
   x <- x[complete]
   y <- y[complete]
+  n <- length(x)
+
+  # If binsreg available, use it
+  if (use_binsreg) {
+    library(binsreg)
+    result <- binsreg(y, x, line = c(3, 3), cb = c(3, 3))
+    return(list(plot = result$bins_plot, binsreg_output = result))
+  }
+
+  # Fallback: Rule-of-thumb number of bins (Cattaneo et al. suggest n^(1/3))
+  if (is.null(n_bins)) {
+    n_bins <- ceiling(n^(1/3))
+  }
 
   # Create quantile-based bins
   breaks <- quantile(x, probs = seq(0, 1, length.out = n_bins + 1), na.rm = TRUE)
@@ -169,8 +186,8 @@ binscatter <- function(data, x_var, y_var, n_bins = 20, title = "") {
                 color = "darkred", linewidth = 1, linetype = "dashed") +
     labs(
       title = title,
-      subtitle = paste0("N = ", length(x), " | Bins = ", length(unique(bins)),
-                        " | Slope = ", round(coef(fit)[2], 4)),
+      subtitle = paste0("N = ", n, " | Bins = ", length(unique(bins)),
+                        " (ROT: n^1/3) | Slope = ", round(coef(fit)[2], 4)),
       x = "Fact-Intensity (rf_fact_t07)",
       y = "First-Day Return"
     ) +
@@ -190,7 +207,7 @@ binscatter <- function(data, x_var, y_var, n_bins = 20, title = "") {
 #| label: binscatter-full
 #| fig-cap: "Binscatter: Fact-Intensity vs First-Day Return (Full Sample)"
 
-bs_full <- binscatter(df, "rf_fact_t07", "first_day_return", n_bins = 20,
+bs_full <- binscatter(df, "rf_fact_t07", "first_day_return",
                       title = "Full Sample")
 print(bs_full$plot)
 ```
@@ -202,7 +219,7 @@ print(bs_full$plot)
 #| fig-cap: "Binscatter: Fact-Intensity vs First-Day Return (Pre-Omnicare)"
 
 bs_pre <- binscatter(df[!df$post_omnicare, ], "rf_fact_t07", "first_day_return",
-                     n_bins = 15, title = "Pre-Omnicare (before March 24, 2015)")
+                     title = "Pre-Omnicare (before March 24, 2015)")
 print(bs_pre$plot)
 ```
 
@@ -213,7 +230,7 @@ print(bs_pre$plot)
 #| fig-cap: "Binscatter: Fact-Intensity vs First-Day Return (Post-Omnicare)"
 
 bs_post <- binscatter(df[df$post_omnicare, ], "rf_fact_t07", "first_day_return",
-                      n_bins = 20, title = "Post-Omnicare (March 24, 2015 and after)")
+                      title = "Post-Omnicare (March 24, 2015 and after)")
 print(bs_post$plot)
 ```
 
@@ -224,10 +241,11 @@ print(bs_post$plot)
 #| fig-cap: "Binscatter by Period"
 #| fig-height: 5
 
-# Create binned data for both periods
-create_bin_data <- function(data, n_bins = 20) {
+# Create binned data for both periods (using ROT: n^(1/3) bins)
+create_bin_data <- function(data) {
   x <- data$rf_fact_t07
   y <- data$first_day_return
+  n_bins <- ceiling(length(x)^(1/3))  # ROT from Cattaneo et al.
   breaks <- quantile(x, probs = seq(0, 1, length.out = n_bins + 1), na.rm = TRUE)
   breaks <- unique(breaks)
   bins <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
@@ -239,9 +257,9 @@ create_bin_data <- function(data, n_bins = 20) {
   return(bin_means)
 }
 
-bin_pre <- create_bin_data(df[!df$post_omnicare, ], 15)
+bin_pre <- create_bin_data(df[!df$post_omnicare, ])
 bin_pre$period <- "Pre-Omnicare"
-bin_post <- create_bin_data(df[df$post_omnicare, ], 20)
+bin_post <- create_bin_data(df[df$post_omnicare, ])
 bin_post$period <- "Post-Omnicare"
 bin_combined <- rbind(bin_pre, bin_post)
 
@@ -268,10 +286,10 @@ ggplot(bin_combined, aes(x = x_mean, y = y_mean, color = period)) +
 
 Distribution regression estimates the effect of fact-intensity on the probability of exceeding various return thresholds. This provides a more complete picture of how fact-intensity shifts the entire distribution of returns, not just the mean.
 
-For each threshold $\tau$, we estimate:
-$$P(\text{FirstDayReturn}_i > \tau) = \Phi(\alpha_\tau + \beta_\tau \cdot \text{rf\_fact\_t07}_i)$$
+For each threshold $\tau$, we estimate a logistic regression:
+$$P(\text{FirstDayReturn}_i > \tau) = \Lambda(\alpha_\tau + \beta_\tau \cdot \text{rf\_fact\_t07}_i)$$
 
-If higher fact-intensity reduces returns, we expect $\beta_\tau < 0$ (lower probability of exceeding any given threshold).
+where $\Lambda(\cdot)$ is the logistic CDF. If higher fact-intensity reduces returns, we expect $\beta_\tau < 0$ (lower probability of exceeding any given threshold).
 
 ```{r}
 #| label: distribution-regression-function
@@ -306,7 +324,7 @@ distribution_regression <- function(data, x_var, y_var,
     if (length(unique(y_binary)) < 2) next
 
     # Logistic regression
-    model <- glm(y_binary ~ x, family = binomial(link = "probit"))
+    model <- glm(y_binary ~ x, family = binomial(link = "logit"))
     coefs <- summary(model)$coefficients
 
     results <- rbind(results, data.frame(
@@ -342,7 +360,7 @@ ggplot(dr_full, aes(x = threshold, y = coefficient)) +
     title = "Distribution Regression: Effect of Fact-Intensity Across Return Thresholds",
     subtitle = "Full Sample | Negative coefficients indicate lower probability of exceeding threshold",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Probit)"
+    y = "Coefficient on rf_fact_t07 (Logit)"
   ) +
   theme_minimal() +
   theme(plot.title = element_text(face = "bold"))
@@ -368,7 +386,7 @@ ggplot(dr_pre, aes(x = threshold, y = coefficient)) +
     title = "Distribution Regression: Pre-Omnicare",
     subtitle = "Before March 24, 2015",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Probit)"
+    y = "Coefficient on rf_fact_t07 (Logit)"
   ) +
   theme_minimal() +
   theme(plot.title = element_text(face = "bold"))
@@ -394,7 +412,7 @@ ggplot(dr_post, aes(x = threshold, y = coefficient)) +
     title = "Distribution Regression: Post-Omnicare",
     subtitle = "March 24, 2015 and after",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Probit)"
+    y = "Coefficient on rf_fact_t07 (Logit)"
   ) +
   theme_minimal() +
   theme(plot.title = element_text(face = "bold"))
@@ -421,7 +439,7 @@ ggplot(dr_combined, aes(x = threshold, y = coefficient, color = period, fill = p
   labs(
     title = "Distribution Regression: Pre vs Post-Omnicare",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Probit)",
+    y = "Coefficient on rf_fact_t07 (Logit)",
     color = "Period",
     fill = "Period"
   ) +
@@ -470,12 +488,16 @@ if (full_coef < 0) {
 
 ### Binscatter Method
 
-The binscatter implementation uses quantile-based binning, which approximates the IMSE-optimal binning procedure from Cattaneo, Crump, Farrell, and Feng (2024). The number of bins is selected to balance bias-variance tradeoffs.
+The binscatter implementation uses quantile-based binning with the rule-of-thumb (ROT) number of bins $J \approx \lceil n^{1/3} \rceil$. For proper IMSE-optimal binning with data-driven bin selection, confidence bands, and polynomial smoothing, install the [`binsreg`](https://nppackages.github.io/binsreg/) package:
+
+```r
+install.packages("binsreg")
+```
 
 Reference: Cattaneo, M. D., Crump, R. K., Farrell, M. H., & Feng, Y. (2024). "On Binscatter." *American Economic Review*, 114(5), 1488-1514.
 
 ### Distribution Regression
 
-Distribution regression estimates the conditional distribution function at various quantiles, providing insight into heterogeneous effects across the return distribution. We use probit link functions for stability.
+Distribution regression estimates the conditional distribution function at various thresholds, providing insight into heterogeneous effects across the return distribution. We use logit link functions (logistic regression) at each threshold.
 
-This approach is related to quantile regression but estimates $P(Y > \tau | X)$ rather than conditional quantiles directly.
+This approach is related to quantile regression but estimates $P(Y > \tau | X)$ rather than conditional quantiles directly. The logit coefficients represent the change in log-odds of exceeding threshold $\tau$ for a one-unit increase in fact-intensity.
