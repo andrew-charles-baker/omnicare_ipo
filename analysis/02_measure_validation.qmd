@@ -30,6 +30,8 @@ Each analysis is conducted for:
 - Pre-Omnicare (before March 24, 2015)
 - Post-Omnicare (March 24, 2015 and after)
 
+**Sample Restriction**: We restrict the sample to IPOs with an offer price ≥ $5 to exclude penny stocks and very small offerings that may exhibit extreme volatility unrelated to disclosure quality.
+
 ```{r}
 #| label: setup
 #| message: false
@@ -38,13 +40,16 @@ Each analysis is conducted for:
 library(ggplot2)
 
 # Load data
-df <- read.csv("../data/omnicare_rf.csv")
+df_raw <- read.csv("../data/omnicare_rf.csv")
+df <- df_raw[df_raw$offer_price >= 5, ]  # Restrict to offer price >= $5
 
 # Create post-Omnicare indicator
 df$post_omnicare <- as.Date(df$offer_date) >= as.Date("2015-03-24")
 df$period <- ifelse(df$post_omnicare, "Post-Omnicare", "Pre-Omnicare")
 
 # Sample sizes
+cat("Sample restriction: offer_price >= $5\n")
+cat("Original sample:", nrow(df_raw), "| Restricted sample:", nrow(df), "\n\n")
 cat("Full sample:", nrow(df), "\n")
 cat("Pre-Omnicare:", sum(!df$post_omnicare), "\n")
 cat("Post-Omnicare:", sum(df$post_omnicare), "\n")

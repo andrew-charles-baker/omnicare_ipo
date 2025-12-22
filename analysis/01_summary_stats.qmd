@@ -17,11 +17,19 @@ The Omnicare decision clarified liability standards under Section 11 of the Secu
 - **2nd & 9th Circuits**: Expanded plaintiff avenues (new omission theory)
 - **6th Circuit**: Heightened pleading standards
 
+**Sample Restriction**: We restrict the sample to IPOs with an offer price ≥ $5 to exclude penny stocks and very small offerings that may exhibit extreme volatility unrelated to disclosure quality.
+
 ```{r}
 #| label: setup
 #| message: false
 
-df <- read.csv("../data/omnicare_rf.csv")
+df_raw <- read.csv("../data/omnicare_rf.csv")
+df <- df_raw[df_raw$offer_price >= 5, ]  # Restrict to offer price >= $5
+
+cat("Sample restriction: offer_price >= $5\n")
+cat("Original sample:", nrow(df_raw), "\n")
+cat("Restricted sample:", nrow(df), "\n")
+cat("Excluded:", nrow(df_raw) - nrow(df), "IPOs\n")
 ```
 
 ## Dataset Overview
