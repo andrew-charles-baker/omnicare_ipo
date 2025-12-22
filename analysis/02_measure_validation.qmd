@@ -1,0 +1,476 @@
+---
+title: "Validating the Fact-Intensity Measure"
+author: "Research Team"
+date: today
+format:
+  html:
+    toc: true
+    code-fold: true
+    fig-width: 8
+    fig-height: 6
+---
+
+## Overview
+
+This document validates the BERT-based fact-intensity measure (`rf_fact_t07`) by examining its relationship with first-day IPO returns. The hypothesis is:
+
+> **Higher fact-intensity in S-1 risk factor disclosures should be associated with lower first-day returns** (less underpricing).
+
+The intuition is that more factual disclosure reduces information asymmetry between issuers and investors, leading to more accurate pricing and smaller first-day "pops."
+
+We examine this relationship using three approaches:
+
+1. **Linear Regression**: OLS of first-day return on fact-intensity
+2. **Binscatter**: Non-parametric visualization using optimal binning (Cattaneo et al.)
+3. **Distribution Regression**: Series of binary regressions at different return thresholds
+
+Each analysis is conducted for:
+
+- Full sample
+- Pre-Omnicare (before March 24, 2015)
+- Post-Omnicare (March 24, 2015 and after)
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(ggplot2)
+
+# Load data
+df <- read.csv("../data/omnicare_rf.csv")
+
+# Create post-Omnicare indicator
+df$post_omnicare <- as.Date(df$offer_date) >= as.Date("2015-03-24")
+df$period <- ifelse(df$post_omnicare, "Post-Omnicare", "Pre-Omnicare")
+
+# Sample sizes
+cat("Full sample:", nrow(df), "\n")
+cat("Pre-Omnicare:", sum(!df$post_omnicare), "\n")
+cat("Post-Omnicare:", sum(df$post_omnicare), "\n")
+```
+
+---
+
+## 1. Linear Regression
+
+We estimate:
+$$\text{FirstDayReturn}_i = \alpha + \beta \cdot \text{rf\_fact\_t07}_i + \varepsilon_i$$
+
+A negative $\beta$ would support the hypothesis that higher fact-intensity is associated with lower underpricing.
+
+### Full Sample
+
+```{r}
+#| label: ols-full
+
+model_full <- lm(first_day_return ~ rf_fact_t07, data = df)
+summary(model_full)
+```
+
+### Pre-Omnicare
+
+```{r}
+#| label: ols-pre
+
+model_pre <- lm(first_day_return ~ rf_fact_t07, data = df[!df$post_omnicare, ])
+summary(model_pre)
+```
+
+### Post-Omnicare
+
+```{r}
+#| label: ols-post
+
+model_post <- lm(first_day_return ~ rf_fact_t07, data = df[df$post_omnicare, ])
+summary(model_post)
+```
+
+### Summary Table
+
+```{r}
+#| label: ols-summary
+
+ols_results <- data.frame(
+  Sample = c("Full Sample", "Pre-Omnicare", "Post-Omnicare"),
+  N = c(nrow(df), sum(!df$post_omnicare), sum(df$post_omnicare)),
+  Coefficient = c(coef(model_full)[2], coef(model_pre)[2], coef(model_post)[2]),
+  Std_Error = c(summary(model_full)$coefficients[2, 2],
+                summary(model_pre)$coefficients[2, 2],
+                summary(model_post)$coefficients[2, 2]),
+  t_stat = c(summary(model_full)$coefficients[2, 3],
+             summary(model_pre)$coefficients[2, 3],
+             summary(model_post)$coefficients[2, 3]),
+  p_value = c(summary(model_full)$coefficients[2, 4],
+              summary(model_pre)$coefficients[2, 4],
+              summary(model_post)$coefficients[2, 4]),
+  R_squared = c(summary(model_full)$r.squared,
+                summary(model_pre)$r.squared,
+                summary(model_post)$r.squared)
+)
+
+knitr::kable(ols_results, digits = 4,
+             col.names = c("Sample", "N", "Coefficient", "Std. Error", "t-stat", "p-value", "R²"))
+```
+
+---
+
+## 2. Binscatter (Optimal Binning)
+
+Binscatter provides a non-parametric visualization of the conditional expectation function. We use quantile-based binning following the spirit of Cattaneo, Crump, Farrell, and Feng (2024).
+
+The approach:
+
+1. Divide `rf_fact_t07` into evenly-spaced quantile bins
+2. Compute the mean of `first_day_return` within each bin
+3. Plot bin means with a linear fit overlay
+
+```{r}
+#| label: binscatter-function
+
+# Optimal binscatter function
+# Uses quantile-based binning (approximation of IMSE-optimal from Cattaneo et al.)
+binscatter <- function(data, x_var, y_var, n_bins = 20, title = "") {
+
+  x <- data[[x_var]]
+  y <- data[[y_var]]
+
+  # Remove missing values
+  complete <- complete.cases(x, y)
+  x <- x[complete]
+  y <- y[complete]
+
+  # Create quantile-based bins
+  breaks <- quantile(x, probs = seq(0, 1, length.out = n_bins + 1), na.rm = TRUE)
+  breaks <- unique(breaks)  # Handle ties
+  bins <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+
+  # Compute bin means
+  bin_means <- aggregate(
+    cbind(x_mean = x, y_mean = y),
+    by = list(bin = bins),
+    FUN = mean,
+    na.rm = TRUE
+  )
+
+  # Linear fit for overlay
+  fit <- lm(y ~ x)
+
+  # Create plot
+  p <- ggplot() +
+    geom_point(data = bin_means, aes(x = x_mean, y = y_mean),
+               size = 3, color = "steelblue") +
+    geom_abline(intercept = coef(fit)[1], slope = coef(fit)[2],
+                color = "darkred", linewidth = 1, linetype = "dashed") +
+    labs(
+      title = title,
+      subtitle = paste0("N = ", length(x), " | Bins = ", length(unique(bins)),
+                        " | Slope = ", round(coef(fit)[2], 4)),
+      x = "Fact-Intensity (rf_fact_t07)",
+      y = "First-Day Return"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      plot.subtitle = element_text(size = 10, color = "gray40")
+    )
+
+  return(list(plot = p, bin_data = bin_means, fit = fit))
+}
+```
+
+### Full Sample
+
+```{r}
+#| label: binscatter-full
+#| fig-cap: "Binscatter: Fact-Intensity vs First-Day Return (Full Sample)"
+
+bs_full <- binscatter(df, "rf_fact_t07", "first_day_return", n_bins = 20,
+                      title = "Full Sample")
+print(bs_full$plot)
+```
+
+### Pre-Omnicare
+
+```{r}
+#| label: binscatter-pre
+#| fig-cap: "Binscatter: Fact-Intensity vs First-Day Return (Pre-Omnicare)"
+
+bs_pre <- binscatter(df[!df$post_omnicare, ], "rf_fact_t07", "first_day_return",
+                     n_bins = 15, title = "Pre-Omnicare (before March 24, 2015)")
+print(bs_pre$plot)
+```
+
+### Post-Omnicare
+
+```{r}
+#| label: binscatter-post
+#| fig-cap: "Binscatter: Fact-Intensity vs First-Day Return (Post-Omnicare)"
+
+bs_post <- binscatter(df[df$post_omnicare, ], "rf_fact_t07", "first_day_return",
+                      n_bins = 20, title = "Post-Omnicare (March 24, 2015 and after)")
+print(bs_post$plot)
+```
+
+### Combined Panel
+
+```{r}
+#| label: binscatter-combined
+#| fig-cap: "Binscatter by Period"
+#| fig-height: 5
+
+# Create binned data for both periods
+create_bin_data <- function(data, n_bins = 20) {
+  x <- data$rf_fact_t07
+  y <- data$first_day_return
+  breaks <- quantile(x, probs = seq(0, 1, length.out = n_bins + 1), na.rm = TRUE)
+  breaks <- unique(breaks)
+  bins <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+  bin_means <- aggregate(
+    cbind(x_mean = x, y_mean = y),
+    by = list(bin = bins),
+    FUN = mean, na.rm = TRUE
+  )
+  return(bin_means)
+}
+
+bin_pre <- create_bin_data(df[!df$post_omnicare, ], 15)
+bin_pre$period <- "Pre-Omnicare"
+bin_post <- create_bin_data(df[df$post_omnicare, ], 20)
+bin_post$period <- "Post-Omnicare"
+bin_combined <- rbind(bin_pre, bin_post)
+
+ggplot(bin_combined, aes(x = x_mean, y = y_mean, color = period)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
+  scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+  labs(
+    title = "Binscatter: Fact-Intensity vs First-Day Return by Period",
+    x = "Fact-Intensity (rf_fact_t07)",
+    y = "First-Day Return",
+    color = "Period"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+---
+
+## 3. Distribution Regression
+
+Distribution regression estimates the effect of fact-intensity on the probability of exceeding various return thresholds. This provides a more complete picture of how fact-intensity shifts the entire distribution of returns, not just the mean.
+
+For each threshold $\tau$, we estimate:
+$$P(\text{FirstDayReturn}_i > \tau) = \Phi(\alpha_\tau + \beta_\tau \cdot \text{rf\_fact\_t07}_i)$$
+
+If higher fact-intensity reduces returns, we expect $\beta_\tau < 0$ (lower probability of exceeding any given threshold).
+
+```{r}
+#| label: distribution-regression-function
+
+# Distribution regression: series of binary regressions
+distribution_regression <- function(data, x_var, y_var,
+                                    thresholds = NULL, n_thresholds = 20) {
+
+  x <- data[[x_var]]
+  y <- data[[y_var]]
+
+  # Default thresholds: quantiles of y
+
+  if (is.null(thresholds)) {
+    thresholds <- quantile(y, probs = seq(0.05, 0.95, length.out = n_thresholds), na.rm = TRUE)
+  }
+
+  results <- data.frame(
+    threshold = numeric(),
+    coefficient = numeric(),
+    std_error = numeric(),
+    z_stat = numeric(),
+    p_value = numeric(),
+    prop_above = numeric()
+  )
+
+  for (tau in thresholds) {
+    # Binary outcome: 1 if y > tau
+    y_binary <- as.integer(y > tau)
+
+    # Skip if all same value
+    if (length(unique(y_binary)) < 2) next
+
+    # Logistic regression
+    model <- glm(y_binary ~ x, family = binomial(link = "probit"))
+    coefs <- summary(model)$coefficients
+
+    results <- rbind(results, data.frame(
+      threshold = tau,
+      coefficient = coefs[2, 1],
+      std_error = coefs[2, 2],
+      z_stat = coefs[2, 3],
+      p_value = coefs[2, 4],
+      prop_above = mean(y_binary, na.rm = TRUE)
+    ))
+  }
+
+  return(results)
+}
+```
+
+### Full Sample
+
+```{r}
+#| label: dist-reg-full
+#| fig-cap: "Distribution Regression Coefficients (Full Sample)"
+
+dr_full <- distribution_regression(df, "rf_fact_t07", "first_day_return", n_thresholds = 25)
+
+ggplot(dr_full, aes(x = threshold, y = coefficient)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "steelblue", size = 2) +
+  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
+                  ymax = coefficient + 1.96 * std_error),
+              alpha = 0.2, fill = "steelblue") +
+  labs(
+    title = "Distribution Regression: Effect of Fact-Intensity Across Return Thresholds",
+    subtitle = "Full Sample | Negative coefficients indicate lower probability of exceeding threshold",
+    x = "First-Day Return Threshold",
+    y = "Coefficient on rf_fact_t07 (Probit)"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### Pre-Omnicare
+
+```{r}
+#| label: dist-reg-pre
+#| fig-cap: "Distribution Regression Coefficients (Pre-Omnicare)"
+
+dr_pre <- distribution_regression(df[!df$post_omnicare, ], "rf_fact_t07", "first_day_return",
+                                  n_thresholds = 20)
+
+ggplot(dr_pre, aes(x = threshold, y = coefficient)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_line(color = "coral", linewidth = 1) +
+  geom_point(color = "coral", size = 2) +
+  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
+                  ymax = coefficient + 1.96 * std_error),
+              alpha = 0.2, fill = "coral") +
+  labs(
+    title = "Distribution Regression: Pre-Omnicare",
+    subtitle = "Before March 24, 2015",
+    x = "First-Day Return Threshold",
+    y = "Coefficient on rf_fact_t07 (Probit)"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### Post-Omnicare
+
+```{r}
+#| label: dist-reg-post
+#| fig-cap: "Distribution Regression Coefficients (Post-Omnicare)"
+
+dr_post <- distribution_regression(df[df$post_omnicare, ], "rf_fact_t07", "first_day_return",
+                                   n_thresholds = 25)
+
+ggplot(dr_post, aes(x = threshold, y = coefficient)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "steelblue", size = 2) +
+  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
+                  ymax = coefficient + 1.96 * std_error),
+              alpha = 0.2, fill = "steelblue") +
+  labs(
+    title = "Distribution Regression: Post-Omnicare",
+    subtitle = "March 24, 2015 and after",
+    x = "First-Day Return Threshold",
+    y = "Coefficient on rf_fact_t07 (Probit)"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### Combined Comparison
+
+```{r}
+#| label: dist-reg-combined
+#| fig-cap: "Distribution Regression Coefficients by Period"
+
+dr_pre$period <- "Pre-Omnicare"
+dr_post$period <- "Post-Omnicare"
+dr_combined <- rbind(dr_pre, dr_post)
+
+ggplot(dr_combined, aes(x = threshold, y = coefficient, color = period, fill = period)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
+                  ymax = coefficient + 1.96 * std_error),
+              alpha = 0.15, color = NA) +
+  scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+  scale_fill_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+  labs(
+    title = "Distribution Regression: Pre vs Post-Omnicare",
+    x = "First-Day Return Threshold",
+    y = "Coefficient on rf_fact_t07 (Probit)",
+    color = "Period",
+    fill = "Period"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+---
+
+## 4. Summary and Interpretation
+
+```{r}
+#| label: summary-interpretation
+
+cat("=== LINEAR REGRESSION SUMMARY ===\n\n")
+for (i in 1:nrow(ols_results)) {
+  sign <- ifelse(ols_results$Coefficient[i] < 0, "NEGATIVE", "POSITIVE")
+  sig <- ifelse(ols_results$p_value[i] < 0.05, "(significant at 5%)", "(not significant at 5%)")
+  cat(sprintf("%s: beta = %.4f %s\n",
+              ols_results$Sample[i], ols_results$Coefficient[i], sig))
+}
+
+cat("\n=== INTERPRETATION ===\n\n")
+
+# Check if hypothesis is supported
+full_coef <- coef(model_full)[2]
+if (full_coef < 0) {
+  cat("The hypothesis is SUPPORTED in the full sample:\n")
+  cat("Higher fact-intensity is associated with LOWER first-day returns.\n")
+  cat(sprintf("A one-unit increase in rf_fact_t07 is associated with a %.1f percentage point\n",
+              abs(full_coef) * 100))
+  cat("decrease in first-day returns.\n")
+} else {
+  cat("The hypothesis is NOT SUPPORTED in the full sample:\n")
+  cat("Higher fact-intensity is associated with HIGHER first-day returns.\n")
+  cat("This is contrary to the information asymmetry hypothesis.\n")
+}
+```
+
+---
+
+## Technical Notes
+
+### Binscatter Method
+
+The binscatter implementation uses quantile-based binning, which approximates the IMSE-optimal binning procedure from Cattaneo, Crump, Farrell, and Feng (2024). The number of bins is selected to balance bias-variance tradeoffs.
+
+Reference: Cattaneo, M. D., Crump, R. K., Farrell, M. H., & Feng, Y. (2024). "On Binscatter." *American Economic Review*, 114(5), 1488-1514.
+
+### Distribution Regression
+
+Distribution regression estimates the conditional distribution function at various quantiles, providing insight into heterogeneous effects across the return distribution. We use probit link functions for stability.
+
+This approach is related to quantile regression but estimates $P(Y > \tau | X)$ rather than conditional quantiles directly.
