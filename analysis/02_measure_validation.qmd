@@ -799,7 +799,215 @@ cat("roll_vwretd: Hot markets (higher prior returns) are associated with",
     "first-day returns\n")
 ```
 
-### 5.2 Distribution Regression with Controls
+### 5.2 Binscatter with Controls
+
+To visualize the partial relationship between fact-intensity and first-day returns after controlling for covariates, we use the Frisch-Waugh-Lovell approach. The `binsreg` package handles this automatically via the `w` parameter for covariates.
+
+```{r}
+#| label: binscatter-controls
+#| fig-cap: "Binscatter with Controls (Full Sample)"
+
+# Prepare control matrix for binsreg (excluding the factor, which we'll handle)
+W_matrix <- model.matrix(~ log_assets + log_proceeds + roll_vwretd + ff12,
+                          data = df_complete)[, -1]  # Remove intercept
+
+if (use_binsreg) {
+  # Use binsreg with covariates
+  library(binsreg)
+  bs_ctrl_result <- binsreg(
+    y = df_complete$first_day_return,
+    x = df_complete$rf_fact_t07,
+    w = W_matrix,
+    line = c(3, 3),
+    ci = c(3, 3)
+  )
+  print(bs_ctrl_result$bins_plot +
+          labs(title = "Binscatter with Controls (Full Sample)",
+               subtitle = "IMSE-optimal binning | Controlling for log(assets), log(proceeds), roll_vwretd, FF12",
+               x = "Fact-Intensity (rf_fact_t07)",
+               y = "First-Day Return (residualized)"))
+
+} else {
+  # Fallback: Manual FWL residualization
+  resid_y_model <- lm(first_day_return ~ log_assets + log_proceeds + roll_vwretd + ff12,
+                       data = df_complete)
+  resid_x_model <- lm(rf_fact_t07 ~ log_assets + log_proceeds + roll_vwretd + ff12,
+                       data = df_complete)
+
+  df_complete$resid_y <- residuals(resid_y_model)
+  df_complete$resid_x <- residuals(resid_x_model)
+
+  # Binscatter on residualized data
+  x <- df_complete$resid_x
+  y <- df_complete$resid_y
+  n <- length(x)
+  n_bins <- ceiling(n^(1/3))
+
+  breaks <- quantile(x, probs = seq(0, 1, length.out = n_bins + 1), na.rm = TRUE)
+  breaks <- unique(breaks)
+  bins <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+
+  bin_means <- aggregate(
+    cbind(x_mean = x, y_mean = y),
+    by = list(bin = bins),
+    FUN = mean, na.rm = TRUE
+  )
+
+  fit <- lm(y ~ x)
+
+  p <- ggplot() +
+    geom_point(data = bin_means, aes(x = x_mean, y = y_mean),
+               size = 3, color = "darkgreen") +
+    geom_abline(intercept = coef(fit)[1], slope = coef(fit)[2],
+                color = "darkgreen", linewidth = 1, linetype = "dashed") +
+    labs(
+      title = "Binscatter with Controls (Full Sample)",
+      subtitle = paste0("N = ", n, " | Bins = ", length(unique(bins)),
+                        " | Slope = ", round(coef(fit)[2], 4),
+                        " | FWL residualization"),
+      x = "Residualized Fact-Intensity",
+      y = "Residualized First-Day Return"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      plot.subtitle = element_text(size = 10, color = "gray40")
+    )
+
+  print(p)
+}
+
+cat("\nOLS coefficient on rf_fact_t07 (with controls):",
+    round(coef(model_full_ctrl)["rf_fact_t07"], 4), "\n")
+```
+
+### Binscatter by Period (with Controls)
+
+```{r}
+#| label: binscatter-controls-periods
+#| fig-cap: "Binscatter with Controls by Period"
+#| fig-height: 5
+
+# Split data by period
+df_pre <- df_complete[!df_complete$post_omnicare, ]
+df_post <- df_complete[df_complete$post_omnicare, ]
+
+if (use_binsreg) {
+  # Use binsreg with covariates for each period
+  library(binsreg)
+
+  # Control matrices for each period
+  W_pre <- model.matrix(~ log_assets + log_proceeds + roll_vwretd + ff12,
+                         data = df_pre)[, -1]
+  W_post <- model.matrix(~ log_assets + log_proceeds + roll_vwretd + ff12,
+                          data = df_post)[, -1]
+
+  # Pre-Omnicare
+  bs_pre_ctrl <- binsreg(
+    y = df_pre$first_day_return,
+    x = df_pre$rf_fact_t07,
+    w = W_pre,
+    line = c(3, 3)
+  )
+
+  # Post-Omnicare
+  bs_post_ctrl <- binsreg(
+    y = df_post$first_day_return,
+    x = df_post$rf_fact_t07,
+    w = W_post,
+    line = c(3, 3)
+  )
+
+  # Extract bin data and combine
+  pre_data <- bs_pre_ctrl$data.plot$`Group Full Sample`$data.dots
+  pre_data$period <- "Pre-Omnicare"
+  post_data <- bs_post_ctrl$data.plot$`Group Full Sample`$data.dots
+  post_data$period <- "Post-Omnicare"
+  combined_data <- rbind(pre_data, post_data)
+
+  # Get slopes from OLS with controls
+  slope_pre <- coef(model_pre_ctrl)["rf_fact_t07"]
+  slope_post <- coef(model_post_ctrl)["rf_fact_t07"]
+
+  ggplot(combined_data, aes(x = x, y = fit, color = period)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
+    scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+    labs(
+      title = "Binscatter with Controls: Pre vs. Post-Omnicare",
+      subtitle = sprintf("OLS slopes (with controls): Pre = %.4f | Post = %.4f", slope_pre, slope_post),
+      x = "Fact-Intensity (rf_fact_t07)",
+      y = "First-Day Return (residualized)",
+      color = "Period"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold")
+    )
+
+} else {
+  # Fallback: Manual FWL residualization
+  resid_y_pre <- lm(first_day_return ~ log_assets + log_proceeds + roll_vwretd + ff12,
+                     data = df_pre)
+  resid_x_pre <- lm(rf_fact_t07 ~ log_assets + log_proceeds + roll_vwretd + ff12,
+                     data = df_pre)
+  df_pre$resid_y <- residuals(resid_y_pre)
+  df_pre$resid_x <- residuals(resid_x_pre)
+
+  resid_y_post <- lm(first_day_return ~ log_assets + log_proceeds + roll_vwretd + ff12,
+                      data = df_post)
+  resid_x_post <- lm(rf_fact_t07 ~ log_assets + log_proceeds + roll_vwretd + ff12,
+                      data = df_post)
+  df_post$resid_y <- residuals(resid_y_post)
+  df_post$resid_x <- residuals(resid_x_post)
+
+  # Create binned data for both periods
+  create_resid_bins <- function(data) {
+    x <- data$resid_x
+    y <- data$resid_y
+    n_bins <- ceiling(length(x)^(1/3))
+    breaks <- quantile(x, probs = seq(0, 1, length.out = n_bins + 1), na.rm = TRUE)
+    breaks <- unique(breaks)
+    bins <- cut(x, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+    bin_means <- aggregate(
+      cbind(x_mean = x, y_mean = y),
+      by = list(bin = bins),
+      FUN = mean, na.rm = TRUE
+    )
+    return(bin_means)
+  }
+
+  bin_pre_ctrl <- create_resid_bins(df_pre)
+  bin_pre_ctrl$period <- "Pre-Omnicare"
+  bin_post_ctrl <- create_resid_bins(df_post)
+  bin_post_ctrl$period <- "Post-Omnicare"
+  bin_combined_ctrl <- rbind(bin_pre_ctrl, bin_post_ctrl)
+
+  # Get slopes for annotation
+  slope_pre <- coef(lm(resid_y ~ resid_x, data = df_pre))[2]
+  slope_post <- coef(lm(resid_y ~ resid_x, data = df_post))[2]
+
+  ggplot(bin_combined_ctrl, aes(x = x_mean, y = y_mean, color = period)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm", se = FALSE, linetype = "dashed") +
+    scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+    labs(
+      title = "Binscatter with Controls: Pre vs. Post-Omnicare",
+      subtitle = sprintf("Slopes: Pre = %.4f | Post = %.4f", slope_pre, slope_post),
+      x = "Residualized Fact-Intensity",
+      y = "Residualized First-Day Return",
+      color = "Period"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold")
+    )
+}
+```
+
+### 5.3 Distribution Regression with Controls
 
 We extend the distribution regression to include covariates. For each threshold $\tau$, we estimate:
 
@@ -1042,7 +1250,7 @@ ggplot(dr_periods_ctrl, aes(x = threshold, y = marginal_effect,
   )
 ```
 
-### 5.3 Summary of Covariate Analysis
+### 5.4 Summary of Covariate Analysis
 
 ```{r}
 #| label: covariate-summary
