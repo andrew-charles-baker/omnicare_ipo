@@ -289,30 +289,43 @@ Distribution regression estimates the effect of fact-intensity on the probabilit
 For each threshold $\tau$, we estimate a logistic regression:
 $$P(\text{FirstDayReturn}_i > \tau) = \Lambda(\alpha_\tau + \beta_\tau \cdot \text{rf\_fact\_t07}_i)$$
 
-where $\Lambda(\cdot)$ is the logistic CDF. If higher fact-intensity reduces returns, we expect $\beta_\tau < 0$ (lower probability of exceeding any given threshold).
+where $\Lambda(\cdot)$ is the logistic CDF. We report **marginal effects** evaluated at the sample mean:
+$$\frac{\partial P(Y > \tau | X = \bar{x})}{\partial x} = \beta_\tau \cdot \Lambda(\alpha_\tau + \beta_\tau \bar{x}) \cdot (1 - \Lambda(\alpha_\tau + \beta_\tau \bar{x}))$$
+
+If higher fact-intensity reduces returns, we expect negative marginal effects (lower probability of exceeding any given threshold).
 
 ```{r}
 #| label: distribution-regression-function
 
-# Distribution regression: series of binary regressions
+# Distribution regression: series of binary regressions with marginal effects
 distribution_regression <- function(data, x_var, y_var,
-                                    thresholds = NULL, n_thresholds = 20) {
+                                    thresholds = NULL, n_thresholds = 20,
+                                    n_bootstrap = 200) {
 
   x <- data[[x_var]]
   y <- data[[y_var]]
 
-  # Default thresholds: quantiles of y
+  # Remove missing values
+  complete <- complete.cases(x, y)
+  x <- x[complete]
+  y <- y[complete]
+  n <- length(x)
 
+  # Evaluation point: sample mean of x
+  x_mean <- mean(x, na.rm = TRUE)
+
+  # Default thresholds: quantiles of y
   if (is.null(thresholds)) {
     thresholds <- quantile(y, probs = seq(0.05, 0.95, length.out = n_thresholds), na.rm = TRUE)
+    thresholds <- unique(thresholds)
   }
 
   results <- data.frame(
     threshold = numeric(),
     coefficient = numeric(),
-    std_error = numeric(),
-    z_stat = numeric(),
-    p_value = numeric(),
+    marginal_effect = numeric(),
+    me_lower = numeric(),
+    me_upper = numeric(),
     prop_above = numeric()
   )
 
@@ -325,14 +338,52 @@ distribution_regression <- function(data, x_var, y_var,
 
     # Logistic regression
     model <- glm(y_binary ~ x, family = binomial(link = "logit"))
-    coefs <- summary(model)$coefficients
+    coefs <- coef(model)
+
+    if (any(is.na(coefs)) || length(coefs) < 2) next
+
+    # Marginal effect at sample mean: β * λ(Xβ) * (1 - λ(Xβ))
+    linear_pred <- coefs[1] + coefs[2] * x_mean
+    lambda_val <- plogis(linear_pred)
+    marginal_effect <- coefs[2] * lambda_val * (1 - lambda_val)
+
+    # Bootstrap for confidence intervals
+    boot_me <- numeric(n_bootstrap)
+    for (b in 1:n_bootstrap) {
+      # Weighted bootstrap (exponential weights)
+      weights <- rexp(n, rate = 1)
+
+      tryCatch({
+        boot_fit <- glm(y_binary ~ x, family = binomial(link = "logit"), weights = weights)
+        boot_coefs <- coef(boot_fit)
+        if (!any(is.na(boot_coefs)) && length(boot_coefs) >= 2) {
+          boot_lp <- boot_coefs[1] + boot_coefs[2] * x_mean
+          boot_lambda <- plogis(boot_lp)
+          boot_me[b] <- boot_coefs[2] * boot_lambda * (1 - boot_lambda)
+        } else {
+          boot_me[b] <- NA
+        }
+      }, error = function(e) {
+        boot_me[b] <- NA
+      })
+    }
+
+    # Calculate bootstrap CI
+    boot_me_clean <- boot_me[!is.na(boot_me)]
+    if (length(boot_me_clean) > 10) {
+      me_lower <- quantile(boot_me_clean, 0.025)
+      me_upper <- quantile(boot_me_clean, 0.975)
+    } else {
+      me_lower <- NA
+      me_upper <- NA
+    }
 
     results <- rbind(results, data.frame(
       threshold = tau,
-      coefficient = coefs[2, 1],
-      std_error = coefs[2, 2],
-      z_stat = coefs[2, 3],
-      p_value = coefs[2, 4],
+      coefficient = coefs[2],
+      marginal_effect = marginal_effect,
+      me_lower = me_lower,
+      me_upper = me_upper,
       prop_above = mean(y_binary, na.rm = TRUE)
     ))
   }
@@ -345,22 +396,21 @@ distribution_regression <- function(data, x_var, y_var,
 
 ```{r}
 #| label: dist-reg-full
-#| fig-cap: "Distribution Regression Coefficients (Full Sample)"
+#| fig-cap: "Distribution Regression Marginal Effects (Full Sample)"
 
 dr_full <- distribution_regression(df, "rf_fact_t07", "first_day_return", n_thresholds = 25)
 
-ggplot(dr_full, aes(x = threshold, y = coefficient)) +
+ggplot(dr_full, aes(x = threshold, y = marginal_effect)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper),
+              alpha = 0.2, fill = "steelblue") +
   geom_line(color = "steelblue", linewidth = 1) +
   geom_point(color = "steelblue", size = 2) +
-  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
-                  ymax = coefficient + 1.96 * std_error),
-              alpha = 0.2, fill = "steelblue") +
   labs(
-    title = "Distribution Regression: Effect of Fact-Intensity Across Return Thresholds",
-    subtitle = "Full Sample | Negative coefficients indicate lower probability of exceeding threshold",
+    title = "Distribution Regression: Marginal Effects of Fact-Intensity",
+    subtitle = "Full Sample | Change in P(Return > threshold) per unit increase in rf_fact, evaluated at sample mean",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Logit)"
+    y = "Marginal Effect ∂P/∂rf_fact"
   ) +
   theme_minimal() +
   theme(plot.title = element_text(face = "bold"))
@@ -370,23 +420,22 @@ ggplot(dr_full, aes(x = threshold, y = coefficient)) +
 
 ```{r}
 #| label: dist-reg-pre
-#| fig-cap: "Distribution Regression Coefficients (Pre-Omnicare)"
+#| fig-cap: "Distribution Regression Marginal Effects (Pre-Omnicare)"
 
 dr_pre <- distribution_regression(df[!df$post_omnicare, ], "rf_fact_t07", "first_day_return",
                                   n_thresholds = 20)
 
-ggplot(dr_pre, aes(x = threshold, y = coefficient)) +
+ggplot(dr_pre, aes(x = threshold, y = marginal_effect)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper),
+              alpha = 0.2, fill = "coral") +
   geom_line(color = "coral", linewidth = 1) +
   geom_point(color = "coral", size = 2) +
-  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
-                  ymax = coefficient + 1.96 * std_error),
-              alpha = 0.2, fill = "coral") +
   labs(
     title = "Distribution Regression: Pre-Omnicare",
-    subtitle = "Before March 24, 2015",
+    subtitle = "Before March 24, 2015 | Marginal effects evaluated at sample mean",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Logit)"
+    y = "Marginal Effect ∂P/∂rf_fact"
   ) +
   theme_minimal() +
   theme(plot.title = element_text(face = "bold"))
@@ -396,23 +445,22 @@ ggplot(dr_pre, aes(x = threshold, y = coefficient)) +
 
 ```{r}
 #| label: dist-reg-post
-#| fig-cap: "Distribution Regression Coefficients (Post-Omnicare)"
+#| fig-cap: "Distribution Regression Marginal Effects (Post-Omnicare)"
 
 dr_post <- distribution_regression(df[df$post_omnicare, ], "rf_fact_t07", "first_day_return",
                                    n_thresholds = 25)
 
-ggplot(dr_post, aes(x = threshold, y = coefficient)) +
+ggplot(dr_post, aes(x = threshold, y = marginal_effect)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper),
+              alpha = 0.2, fill = "steelblue") +
   geom_line(color = "steelblue", linewidth = 1) +
   geom_point(color = "steelblue", size = 2) +
-  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
-                  ymax = coefficient + 1.96 * std_error),
-              alpha = 0.2, fill = "steelblue") +
   labs(
     title = "Distribution Regression: Post-Omnicare",
-    subtitle = "March 24, 2015 and after",
+    subtitle = "March 24, 2015 and after | Marginal effects evaluated at sample mean",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Logit)"
+    y = "Marginal Effect ∂P/∂rf_fact"
   ) +
   theme_minimal() +
   theme(plot.title = element_text(face = "bold"))
@@ -422,24 +470,24 @@ ggplot(dr_post, aes(x = threshold, y = coefficient)) +
 
 ```{r}
 #| label: dist-reg-combined
-#| fig-cap: "Distribution Regression Coefficients by Period"
+#| fig-cap: "Distribution Regression Marginal Effects by Period"
 
 dr_pre$period <- "Pre-Omnicare"
 dr_post$period <- "Post-Omnicare"
 dr_combined <- rbind(dr_pre, dr_post)
 
-ggplot(dr_combined, aes(x = threshold, y = coefficient, color = period, fill = period)) +
+ggplot(dr_combined, aes(x = threshold, y = marginal_effect, color = period, fill = period)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-  geom_line(linewidth = 1) +
-  geom_ribbon(aes(ymin = coefficient - 1.96 * std_error,
-                  ymax = coefficient + 1.96 * std_error),
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper),
               alpha = 0.15, color = NA) +
+  geom_line(linewidth = 1) +
   scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
   scale_fill_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
   labs(
     title = "Distribution Regression: Pre vs Post-Omnicare",
+    subtitle = "Marginal effects with bootstrap 95% CIs",
     x = "First-Day Return Threshold",
-    y = "Coefficient on rf_fact_t07 (Logit)",
+    y = "Marginal Effect ∂P/∂rf_fact",
     color = "Period",
     fill = "Period"
   ) +
@@ -500,4 +548,9 @@ Reference: Cattaneo, M. D., Crump, R. K., Farrell, M. H., & Feng, Y. (2024). "On
 
 Distribution regression estimates the conditional distribution function at various thresholds, providing insight into heterogeneous effects across the return distribution. We use logit link functions (logistic regression) at each threshold.
 
-This approach is related to quantile regression but estimates $P(Y > \tau | X)$ rather than conditional quantiles directly. The logit coefficients represent the change in log-odds of exceeding threshold $\tau$ for a one-unit increase in fact-intensity.
+We report **marginal effects** rather than raw logit coefficients. The marginal effect is:
+$$\frac{\partial P(Y > \tau | X = \bar{x})}{\partial x} = \beta \cdot \Lambda(\alpha + \beta \bar{x}) \cdot (1 - \Lambda(\alpha + \beta \bar{x}))$$
+
+evaluated at the sample mean of rf_fact_t07. This gives the actual change in probability (not log-odds) for a one-unit increase in fact-intensity. Bootstrap confidence intervals (200 replications) are computed using weighted bootstrap with exponential weights.
+
+Reference: Chernozhukov, V., Fernández-Val, I., & Melly, B. (2013). "Inference on Counterfactual Distributions." *Econometrica*, 81(6), 2205-2268.
