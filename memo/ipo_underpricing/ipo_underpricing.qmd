@@ -1,0 +1,1177 @@
+---
+title: "IPO Underpricing"
+format: 
+  html:
+    page-layout: full
+    code-fold: true
+    code-tools: true
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-depth: 3
+    self-contained: true
+editor: visual
+author: "Andrew Baker, Yuheng Ling"
+date: now
+---
+
+# Introduction
+
+In this memo we'll discuss the concept of IPO underpricing and information asymmetry, and how it correlates to our facts/opinions variables.
+
+# Overview
+
+IPO underpricing is commonly interpreted as a market response to information asymmetry between issuers, underwriters, and heterogeneous investors. In the [Rock (1986)](https://psyfitec.com/files/files/fuller/ipo/rock%201986.pdf "[PDF] WHY NEW ISSUES ARE UNDERPRICED* Kevin ROCK") "winner's curse" model, uninformed investors face adverse selection because better-informed investors only participate when an issue is attractive; to keep the uninformed in the game, issuers must leave "money on the table," i.e., underprice. [Benveniste and Spindt (1989)](https://www.sciencedirect.com/science/article/pii/0304405X89900512 "How investment bankers determine the offer price and allocation of ...") extend this logic to bookbuilding: underwriters elicit private signals from informed institutions by promising them preferential allocations and partial price adjustments, which again implies systematic underpricing as compensation for revealed information.
+
+Empirically, studies show that proxies for ex ante uncertainty---a stand‑in for asymmetric information---are strongly related to the magnitude of underpricing. [Beatty and Ritter (1986)](https://www.sciencedirect.com/science/article/pii/0304405X86900553 "Investment banking, reputation, and the underpricing of initial public ...") document that IPOs with greater uncertainty (younger firms, smaller sales, riskier industries) exhibit higher initial returns. [Hanley (1993)](https://business.lehigh.edu/sites/default/files/2019-08/7%20hanley_1993_jfe_0.pdf? "[PDF] he underpricing of initial public offerin and the partial adjustment ...") finds that when the final offer price moves above the preliminary filing range---evidence that valuable information surfaced during marketing---underpricing is especially pronounced, consistent with only "partial" incorporation of new information into the offer price. [Loughran and Ritter (2004)](https://site.warrington.ufl.edu/ritter/files/2015/06/Why-Has-IPO-Underpricing-Changed-Over-Time-2004.pdf%22%5BPDF%5D%20Why%20Has%20IPO%20Underpricing%20Changed%20Over%20Time?%20-%20Websites%22) further show that while the average level of underpricing varies dramatically across eras, shifts in how information is produced and allocated in bookbuilt offerings help explain these swings.
+
+Survey pieces synthesize this evidence and situate information asymmetry among the core explanations. [Ritter and Welch (2002)](https://site.warrington.ufl.edu/ritter/files/2016/01/A-Review-of-IPO-Activity-Pricing-and-Allocations-2002-08.pdf "[PDF] A Review of IPO Activity, Pricing, and Allocations - University of Florida") review theory and data and highlight that asymmetric information accounts for many---but not all---IPO regularities, while [Ljungqvist (2007)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=609422 "Alexander Ljungqvist - IPO Underpricing: A Survey - SSRN") catalogues the principal asymmetric‑information models (winner's curse, signaling, bookbuilding) alongside institutional and behavioral alternatives. Together, they reinforce that underpricing is both predicted by and used to infer the severity of informational frictions at the IPO stage.
+
+Because first‑day returns are observable and tightly linked to these mechanisms, researchers routinely employ underpricing as an empirical proxy for the informational gap surrounding an IPO. The practice rests on the theoretical prediction that greater private information (and costlier information revelation) requires larger inducements, and on the empirical regularity that higher measured uncertainty correlates with larger initial returns.
+
+# Comparing with Fact/Opinion Measure
+
+Next, we'll empirically compare IPO underpricing (as a measure of information asymmetry) with our fact/opinion measure. The idea here should be pretty straightforward. In a world where managers can couch statements as opinions, which makes it more difficult to recover under than statements of fact, investors will now need to be concerned with whether they can trust the statements. Litigation acts as an enforcement measure that gives confidence to investors that they can trust representations. In a world where there is no (or less) enforcement, then everything becomes more like cheap talk. Issuers have to leave money on the table in order to induce investors to buy into issuances without a litigation backstop.
+
+To test this, we begin with the IPO database from Jay Ritter's website. We look at IPOs with filing dates from 2011 to 2024-07-24 (probably when I pulled the file). We then match them to the `rf_fact` variable that you created from the S-1 filings, as well as data on the offer price from LSEG and first day ending trading price from CRSP. Note that we don't have a perfect match here, but enough to start. I have Eric and an undergrad RA working on perfecting the match. We also might want to bring in some IPOs with non-S-1 filings. We begin with a shell of 1490 IPOs. After dropping direct public offerings, ADRs, and offerings under \$5 per share (following the literature) we're left with 1390 IPOs.
+
+This is how many observations we have by year:
+
+```{r, message = FALSE, warning = FALSE, error = FALSE}
+#| fig.align = 'center'
+
+library(tidyverse)
+library(ggthemes)
+library(fixest)
+
+theme_set(theme_clean() + 
+            theme(plot.background = element_blank(),
+                  legend.background = element_rect(color = "white")))
+
+# read in data, drop direct offerings and offerings with a price less than 5 dollars
+ipo_data <- read_csv(here::here("Data", "omnicare_rf.csv")) %>% 
+  filter(offer_price >= 5) %>% 
+  # make underpricing variable
+  mutate(pop = (first_day_price - offer_price)/offer_price,
+         year = year(offer_date)) %>% 
+  # drop missing values of underpricing
+  filter(!is.na(pop))
+
+# barchart of IPOs by year
+ipo_by_year <- ipo_data %>% 
+  count(year) %>% 
+  ggplot(aes(x = year, y = n)) + 
+  geom_bar(stat = "identity") +
+  scale_x_continuous(labels = 2011:2024,
+                     breaks = 2011:2024) + 
+  theme_minimal() + 
+  theme(axis.title.y = element_text(hjust = 0.5, vjust = 0.5, angle = 360)) + 
+    labs(
+    title = "IPOs in Sample By Year",
+    x = "Year",
+    y = "# IPOs"
+  )
+
+ggsave(here::here("plots_fordham", "ipo_by_year.jpeg"), ipo_by_year,
+       width = 6, height = 4)
+
+ipo_by_year
+```
+
+## Full-Sample Analyses
+
+First, let's look at the relationship over the full sample, and we'll get into splits by circuit later to look at the effect of Omnicare. First, we want to know if there is a relationship between our information asymmetry measure (IPO underpricing) and our measure of litigation uncertainty. We expect this relationship to be negative (when the share of fact statements is higher, litigation risk is higher, informatin asymmetry is lower, so underpricing should be lower.) First, a simple scatter plot.
+
+```{r, message = FALSE, warning = FALSE, error = FALSE}
+#| fig.align = 'center'
+ipo_data %>%
+  ggplot(aes(x = rf_fact_t07, y = pop)) + 
+  geom_point() + 
+  geom_smooth() + 
+  labs(x = "Fact/Opinion", y = "One-Day Price Change") + 
+  theme(axis.title.y = element_text(hjust = 0.5, vjust = 0.5, angle = 360))
+
+```
+
+So there does seem to be something of a negative relationship, especially in the lower part of the distribution. We can estimate the linear relationship with a simple OLS regresison of:
+
+$$underpricing_i = \alpha + \beta rf\_fact_i + epsilon_i$$ which gives us this result (I include year fixed effects and cluster standard errors at the year level):
+
+```{r, message = FALSE, warning = FALSE, error = FALSE}
+#| fig.align = 'center'
+feols(pop ~ rf_fact_t07 | year, cluster = ~year, data = ipo_data) %>% 
+  broom::tidy()
+
+```
+
+Clearly, this might not be (and doesn't appear to be) a linear relationship. Another thing that we can do here is to use a binscatter. A binscatter partitions the x-variable into bins and plots the average y against the average x in each bin, creating a nonparametric summary of their relationship. It’s commonly used to visualize patterns (optionally after residualizing on controls) without fitting a full flexible curve.I use the `binsreg` command from Cattaneo and co-authors which selects the bins optimally.
+
+```{r, message = FALSE, warning = FALSE, error = FALSE, echo = FALSE}
+#| fig.align = 'center'
+
+library(binsreg)
+
+x <- ipo_data %>% select(pop, rf_fact_t07) %>% drop_na() %>% pull(rf_fact_t07)
+y <- ipo_data %>% select(pop, rf_fact_t07) %>% drop_na() %>% pull(pop)
+
+binscatter <- binsreg(y = y, x = x, ci = c(3, 3))
+```
+
+```{r, message = FALSE, warning = FALSE, error = FALSE, fig.align = 'center'}
+#plot
+plotdata <- ggplot_build(binscatter$bins_plot)
+binscatter <- plotdata$data[[1]] %>% 
+  left_join(plotdata$data[[2]] %>% select(x, ymin, ymax)) %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_ribbon(aes(ymin = ymin, ymax = ymax), fill = "lightgrey") + 
+  geom_point(color = "darkred") + 
+  geom_smooth(se = FALSE, color = "darkred") + 
+  labs(x = "Fact/Opinion", y = "One-Day \n Price Change") + 
+  theme_minimal() + 
+  theme(axis.title.y = element_text(hjust = 0.5, vjust = 0.5, angle = 360)) + 
+  labs(
+  title = "Binscatter Graph: Underpricing ~ Fact/Opinion Measure",
+  x = "Fact/Opinion Measure (rf_fact)",
+  y = "IPO \n Underpricing",
+  caption = "Grey ribbon: 95% confidence intervals\nBins selected opimally using the algorithm from Cattaneo et. al (2024) and the binsreg package."
+)
+
+ggsave(here::here("plots_fordham", "binscatter.png"), binscatter,
+       width = 6, height = 4)
+
+binscatter
+
+
+
+```
+
+So this does suggest that there really is a large negative relationship in the lower tail of the distribution of "truthiness" (where most of the mass is).
+
+One final way to look at this through a distribution regression from [Chernozhukov, Fernandez-Val, and Melly (2013)](https://onlinelibrary.wiley.com/doi/abs/10.3982/ECTA10582), which is the change in the conditional distribution of the outcome given a covariate. In essence, it amounts to directly modeling $F_Y(y|x)$ separately for each threshold $y$.
+
+```{r, message = FALSE, warning = FALSE, error = FALSE}
+#| fig.align = 'center'
+
+library(tidyverse)
+library(sandwich)
+library(lmtest)
+
+# Function to perform distribution regression with logit link
+distribution_regression_direct <- function(data, outcome_var, covariate, y_grid = NULL) {
+  
+  # Remove missing values
+  complete_cases <- complete.cases(data[[outcome_var]], data[[covariate]])
+  data <- data[complete_cases, ]
+  
+  # Step 1: Create grid of y values (thresholds)
+  if (is.null(y_grid)) {
+    # Create grid based on empirical distribution
+    y_values <- data[[outcome_var]]
+    # Use quantiles as grid points for good coverage
+    y_grid <- quantile(y_values, probs = seq(0.05, 0.95, by = 0.01), na.rm = TRUE)
+    # Remove duplicates that can cause issues
+    y_grid <- unique(y_grid)
+  }
+  
+  # length of data and grid search
+  n <- nrow(data)
+  n_grid <- length(y_grid)
+  
+  # Step 2: For each threshold y, create binary indicators and run logit regression
+  distribution_results <- list()
+  successful_fits <- c()
+  
+  for (j in seq_along(y_grid)) {
+    # identify the threshold
+    y_threshold <- y_grid[j]
+    
+    # Create binary indicator: I{Y_i >= y}
+    temp_data <- data
+    temp_data$binary_indicator <- as.numeric(data[[outcome_var]] >= y_threshold)
+    
+    # Check for variation in the binary indicator
+    prop_above <- mean(temp_data$binary_indicator)
+    
+    # Skip if all 0s or all 1s (no variation to model)
+    if (prop_above == 0 || prop_above == 1) {
+      next
+    }
+    
+    # Logistic regression with error handling
+    tryCatch({
+      logit_formula <- as.formula(paste("binary_indicator ~", covariate))
+      logit_fit <- glm(logit_formula, family = binomial(link = "logit"), data = temp_data)
+      
+      # Check if model converged
+      if (!logit_fit$converged) {
+        next
+      }
+      
+      # Check for perfect separation (very large coefficients)
+      if (any(abs(coef(logit_fit)) > 10, na.rm = TRUE)) {
+        # Could continue or skip - let's continue but flag it
+      }
+      
+      # Store results only if successful
+      distribution_results[[length(distribution_results) + 1]] <- list(
+        y_threshold = y_threshold,
+        fit = logit_fit,
+        coefficients = coef(logit_fit),
+        se = sqrt(diag(vcov(logit_fit))),
+        fitted_cdf = fitted(logit_fit),
+        proportion_above = prop_above,
+        converged = logit_fit$converged
+      )
+      
+      successful_fits <- c(successful_fits, y_threshold)
+      
+    }, error = function(e) {
+      # Silent error handling
+    })
+  }
+  
+  if (length(distribution_results) == 0) {
+    stop("No successful model fits. Check your data for issues.")
+  }
+  
+  # Update y_grid to only include successful fits
+  successful_y_grid <- successful_fits
+  
+  return(list(
+    distribution_results = distribution_results,
+    y_grid = successful_y_grid,
+    n_successful = length(distribution_results)
+  ))
+}
+
+# Function to calculate marginal effects with bootstrap confidence intervals
+calculate_marginal_effects <- function(results, data, covariate, eval_points = c("mean", "25th", "75th"), 
+                                       n_bootstrap = 500, confidence_level = 0.95) {
+  
+  y_values <- results$y_grid
+  n_thresholds <- length(y_values)
+  
+  # Remove missing values for covariate
+  complete_cases <- complete.cases(data[[covariate]], data[["pop"]])
+  clean_data <- data[complete_cases, ]
+  x_values <- clean_data[[covariate]]
+  
+  # Define evaluation points
+  eval_values <- list()
+  if ("mean" %in% eval_points) eval_values[["mean"]] <- mean(x_values, na.rm = TRUE)
+  if ("25th" %in% eval_points) eval_values[["25th"]] <- quantile(x_values, 0.25, na.rm = TRUE)
+  if ("75th" %in% eval_points) eval_values[["75th"]] <- quantile(x_values, 0.75, na.rm = TRUE)
+  
+  # Calculate marginal effects for each evaluation point
+  me_results <- data.frame()
+  
+  for (eval_name in names(eval_values)) {
+    x_eval <- eval_values[[eval_name]]
+    
+    # Original marginal effects
+    original_me <- numeric(n_thresholds)
+    
+    for (i in 1:n_thresholds) {
+      tryCatch({
+        fit <- results$distribution_results[[i]]$fit
+        coefs <- coef(fit)
+        
+        if (any(is.na(coefs)) || length(coefs) < 2) {
+          original_me[i] <- NA
+          next
+        }
+        
+        # Marginal effect = β * λ(X'β) * (1 - λ(X'β))
+        linear_pred <- coefs[1] + coefs[2] * x_eval
+        lambda_val <- plogis(linear_pred)
+        original_me[i] <- coefs[2] * lambda_val * (1 - lambda_val)
+        
+      }, error = function(e) {
+        original_me[i] <- NA
+      })
+    }
+    
+    # Bootstrap marginal effects
+    bootstrap_me <- matrix(NA, nrow = n_bootstrap, ncol = n_thresholds)
+    
+    for (b in 1:n_bootstrap) {
+      # Weighted bootstrap (exponential weights)
+      n <- nrow(clean_data)
+      weights <- rexp(n, rate = 1)  # exponential weights with rate 1
+      
+      # Bootstrap marginal effects for this iteration
+      boot_me <- numeric(n_thresholds)
+      
+      for (i in 1:n_thresholds) {
+        y_threshold <- y_values[i]
+        
+        tryCatch({
+          # Create bootstrap sample data
+          boot_data <- clean_data
+          boot_data$binary_indicator <- as.numeric(clean_data[["pop"]] >= y_threshold)
+          
+          # Check for variation
+          if (var(boot_data$binary_indicator) == 0) {
+            boot_me[i] <- NA
+            next
+          }
+          
+          # Weighted logistic regression
+          logit_formula <- as.formula(paste("binary_indicator ~", covariate))
+          boot_fit <- glm(logit_formula, family = binomial(link = "logit"), 
+                          data = boot_data, weights = weights)
+          
+          if (!boot_fit$converged) {
+            boot_me[i] <- NA
+            next
+          }
+          
+          boot_coefs <- coef(boot_fit)
+          if (any(is.na(boot_coefs)) || length(boot_coefs) < 2) {
+            boot_me[i] <- NA
+            next
+          }
+          
+          # Calculate marginal effect for bootstrap sample
+          linear_pred <- boot_coefs[1] + boot_coefs[2] * x_eval
+          lambda_val <- plogis(linear_pred)
+          boot_me[i] <- boot_coefs[2] * lambda_val * (1 - lambda_val)
+          
+        }, error = function(e) {
+          boot_me[i] <- NA
+        })
+      }
+      
+      bootstrap_me[b, ] <- boot_me
+    }
+    
+    # Calculate confidence intervals from bootstrap distribution
+    alpha <- 1 - confidence_level
+    me_lower <- numeric(n_thresholds)
+    me_upper <- numeric(n_thresholds)
+    
+    for (i in 1:n_thresholds) {
+      boot_values <- bootstrap_me[, i]
+      boot_values <- boot_values[!is.na(boot_values)]
+      
+      if (length(boot_values) > 10) {  # Need sufficient bootstrap samples
+        me_lower[i] <- quantile(boot_values, alpha/2, na.rm = TRUE)
+        me_upper[i] <- quantile(boot_values, 1 - alpha/2, na.rm = TRUE)
+      } else {
+        me_lower[i] <- NA
+        me_upper[i] <- NA
+      }
+    }
+    
+    temp_df <- data.frame(
+      y_threshold = y_values,
+      marginal_effect = original_me,
+      me_lower = me_lower,
+      me_upper = me_upper,
+      eval_point = eval_name,
+      eval_value = x_eval,
+      n_bootstrap_successful = apply(bootstrap_me, 2, function(x) sum(!is.na(x)))
+    )
+    
+    me_results <- rbind(me_results, temp_df)
+  }
+  
+  # Remove rows with missing marginal effects
+  me_results <- me_results[!is.na(me_results$marginal_effect), ]
+  
+  return(me_results)
+}
+
+# Function to calculate difference in marginal effects (75th vs 25th percentile)
+calculate_me_difference <- function(me_results) {
+  me_25th <- me_results[me_results$eval_point == "25th", ]
+  me_75th <- me_results[me_results$eval_point == "75th", ]
+  
+  if (nrow(me_25th) > 0 && nrow(me_75th) > 0) {
+    # Match thresholds between 25th and 75th percentile results
+    common_thresholds <- intersect(me_25th$y_threshold, me_75th$y_threshold)
+    
+    if (length(common_thresholds) > 0) {
+      # Filter to common thresholds and sort
+      me_25th_matched <- me_25th[me_25th$y_threshold %in% common_thresholds, ]
+      me_75th_matched <- me_75th[me_75th$y_threshold %in% common_thresholds, ]
+      
+      me_25th_matched <- me_25th_matched[order(me_25th_matched$y_threshold), ]
+      me_75th_matched <- me_75th_matched[order(me_75th_matched$y_threshold), ]
+      
+      diff_df <- data.frame(
+        y_threshold = me_25th_matched$y_threshold,
+        me_difference = me_75th_matched$marginal_effect - me_25th_matched$marginal_effect,
+        stringsAsFactors = FALSE
+      )
+      
+      # For bootstrap CIs, we need to be more conservative since we don't have the 
+      # bootstrap distribution of the difference. We'll use a simple approach:
+      # If both CIs don't overlap zero, we can be confident about the sign
+      # Otherwise, we'll set wider intervals
+      
+      diff_df$diff_lower <- pmin(me_75th_matched$me_lower - me_25th_matched$me_upper,
+                                 me_75th_matched$me_upper - me_25th_matched$me_lower)
+      diff_df$diff_upper <- pmax(me_75th_matched$me_lower - me_25th_matched$me_upper,
+                                 me_75th_matched$me_upper - me_25th_matched$me_lower)
+      
+      return(diff_df)
+    }
+  }
+  return(NULL)
+}
+
+# Run the analysis
+results <- distribution_regression_direct(
+  data = ipo_data,
+  outcome_var = "pop",
+  covariate = "rf_fact_t07"
+)
+
+# Calculate marginal effects (with bootstrap - this may take a few minutes)
+me_results <- calculate_marginal_effects(results, ipo_data, "rf_fact_t07", 
+                                         n_bootstrap = 200, confidence_level = 0.95)
+
+# Calculate difference between 75th and 25th percentiles
+me_diff <- calculate_me_difference(me_results)
+
+# Summary at mean
+me_mean <- me_results[me_results$eval_point == "mean", ]
+
+# Plot 1: Marginal Effects at Sample Mean
+p1 <- ggplot(me_mean, aes(x = y_threshold, y = marginal_effect)) +
+  geom_line(color = "blue", size = 1.2) +
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper), 
+              alpha = 0.3, fill = "blue") +
+  scale_x_continuous(labels = scales::percent) + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.7) +
+  labs(
+    title = "Marginal Effects: Impact of Facts vs. Opinions on IPO Underpricing Probability",
+    subtitle = "Change in P(Underpricing ≥ y) per unit increase in rf_fact (evaluated at sample mean)",
+    x = "Underpricing Level (y)",
+    y = "Marginal Effect ∂P(POP ≥ y)/∂rf_fact",
+    caption = "Blue ribbon: 95% confidence intervals\nPositive = higher rf_fact increases probability of high underpricing\nNegative = higher rf_fact increases probability of low underpricing"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 13, face = "bold"),
+    plot.subtitle = element_text(size = 11),
+    axis.title = element_text(size = 11),
+    plot.caption = element_text(size = 9, color = "gray50")
+  )
+
+ggsave(here::here("plots_fordham", "distribution_regression.png"), p1,
+       width = 8, height = 5)
+p1
+
+```
+
+You can think of each of the points on the line as being the effect of `rf_fact` on the probability of the underpricing variable being above quantile $q$ for different values of $q$. What this shows is that, in particular for the right tail (a lot of underpricing), the effect of having more facts is pretty strongly negative.
+
+# By Omnicare-Split
+
+First, let's look at what happens if we split the whole sample (ignoring circuits) by before and after the Omnicare decision. Let's look at the CDFs by before and after.
+
+```{r, message = FALSE, warning = FALSE, error = FALSE, fig.height = 10}
+#| fig.align = 'center'
+
+library(patchwork)
+ipo_data <- ipo_data %>% 
+  mutate(omnicare = if_else(offer_date >= ymd(20150324), 1, 0))
+
+# Function to estimate empirical CDF with confidence bands and differences
+estimate_empirical_cdf <- function(data, variable, group_var, n_bootstrap = 500) {
+  
+  # Get unique groups
+  groups <- unique(data[[group_var]])
+  
+  # Create evaluation grid based on combined data
+  all_values <- data[[variable]][!is.na(data[[variable]])]
+  eval_grid <- seq(min(all_values), max(all_values), length.out = 100)
+  
+  results_list <- list()
+  bootstrap_results <- list()
+  
+  for (group in groups) {
+    group_data <- data[data[[group_var]] == group & !is.na(data[[variable]]), ]
+    group_values <- group_data[[variable]]
+    n_obs <- length(group_values)
+    
+    # Calculate empirical CDF
+    empirical_cdf <- sapply(eval_grid, function(x) mean(group_values <= x))
+    
+    # Bootstrap confidence intervals
+    bootstrap_cdfs <- matrix(NA, nrow = n_bootstrap, ncol = length(eval_grid))
+    
+    for (b in 1:n_bootstrap) {
+      # Sample with replacement
+      boot_sample <- sample(group_values, size = n_obs, replace = TRUE)
+      bootstrap_cdfs[b, ] <- sapply(eval_grid, function(x) mean(boot_sample <= x))
+    }
+    
+    # Calculate confidence intervals
+    cdf_lower <- apply(bootstrap_cdfs, 2, quantile, probs = 0.025, na.rm = TRUE)
+    cdf_upper <- apply(bootstrap_cdfs, 2, quantile, probs = 0.975, na.rm = TRUE)
+    
+    # Store results
+    results_list[[as.character(group)]] <- data.frame(
+      x_value = eval_grid,
+      cdf_value = empirical_cdf,
+      cdf_lower = cdf_lower,
+      cdf_upper = cdf_upper,
+      group = group,
+      group_label = ifelse(group == 0, "Before Omnicare", "After Omnicare"),
+      n_obs = n_obs
+    )
+    
+    # Store bootstrap results for difference calculation
+    bootstrap_results[[as.character(group)]] <- bootstrap_cdfs
+  }
+  
+  # Calculate differences if we have both groups
+  if (length(groups) == 2 && all(c("0", "1") %in% names(bootstrap_results))) {
+    
+    # Observed difference (After - Before)
+    cdf_before <- results_list[["0"]]$cdf_value
+    cdf_after <- results_list[["1"]]$cdf_value
+    observed_difference <- cdf_after - cdf_before
+    
+    # Bootstrap distribution of differences
+    bootstrap_diffs <- bootstrap_results[["1"]] - bootstrap_results[["0"]]
+    
+    # Calculate standard errors and confidence intervals for differences
+    diff_se <- apply(bootstrap_diffs, 2, sd, na.rm = TRUE)
+    diff_lower <- apply(bootstrap_diffs, 2, quantile, probs = 0.025, na.rm = TRUE)
+    diff_upper <- apply(bootstrap_diffs, 2, quantile, probs = 0.975, na.rm = TRUE)
+    
+    # Create difference results
+    difference_results <- data.frame(
+      x_value = eval_grid,
+      observed_difference = observed_difference,
+      diff_se = diff_se,
+      diff_lower = diff_lower,
+      diff_upper = diff_upper,
+      t_statistic = observed_difference / diff_se,
+      significant = abs(observed_difference / diff_se) > 1.96
+    )
+    
+    # Combine all results
+    combined_results <- do.call(rbind, results_list)
+    
+    return(list(
+      cdf_results = combined_results,
+      difference_results = difference_results,
+      bootstrap_diffs = bootstrap_diffs
+    ))
+    
+  } else {
+    # Just return CDF results if we don't have both groups
+    combined_results <- do.call(rbind, results_list)
+    return(list(cdf_results = combined_results))
+  }
+}
+
+cdf_analysis <- estimate_empirical_cdf(ipo_data, "rf_fact_t07", "omnicare", n_bootstrap = 1000)
+
+cdfs <- ggplot(cdf_analysis$cdf_results, aes(x = x_value, y = cdf_value, color = group_label, fill = group_label)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = cdf_lower, ymax = cdf_upper), alpha = 0.2) +
+  scale_color_manual(values = c("Before Omnicare" = "blue", "After Omnicare" = "red")) +
+  scale_fill_manual(values = c("Before Omnicare" = "blue", "After Omnicare" = "red")) +
+  ylim(0, 1) + 
+  scale_y_continuous(labels = scales::percent) + 
+  labs(
+    title = "Cumulative Distribution Functions: rf_fact Before vs After Omnicare",
+    subtitle = "Distribution of facts vs opinions in S-1 risk sections",
+    x = "rf_fact (Higher values = More fact-heavy language)",
+    y = "Cumulative Probability F(rf_fact)",
+    color = "Period",
+    fill = "Period",
+    caption = paste0("Ribbons show 95% bootstrap confidence intervals\n")
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "bottom"
+  )
+
+diff_cdfs <- ggplot(cdf_analysis$difference_results, aes(x = x_value, y = observed_difference)) +
+    geom_line(color = "darkgreen", size = 1.2) +
+    geom_ribbon(aes(ymin = diff_lower, ymax = diff_upper), alpha = 0.3, fill = "darkgreen") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
+    geom_point(aes(color = significant), size = 0.8) +
+    scale_color_manual(values = c("FALSE" = "gray", "TRUE" = "red"), 
+                       name = "Significant\n(|t| > 1.96)") +
+    labs(
+      title = "Difference in CDFs: After Omnicare - Before Omnicare",
+      subtitle = "With bootstrap confidence intervals and significance indicators",
+      x = "rf_fact (Higher values = More fact-heavy language)",
+      y = "Difference in Cumulative Probability",
+      caption = paste0("Green ribbon: 95% bootstrap confidence intervals\n",
+                      "Red points: Statistically significant differences\n",
+                      "Mean absolute difference: ", round(mean(abs(cdf_analysis$difference_results$observed_difference)), 4))
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      legend.position = "bottom"
+    )
+
+p1 <- cdfs / diff_cdfs + plot_layout(heights = 20)
+
+ggsave(here::here("plots_fordham", "change_density_rf_fact.png"), p1,
+       width = 14, height = 7)
+
+p1
+```
+
+It does seem (ignoring everything else) that there were more opinions after the decision.
+
+Next, lets show the scatter plot by before and after:
+
+```{r, message = FALSE, warning = FALSE, error = FALSE}
+#| fig.align = 'center'
+ipo_data %>%
+  mutate(Period = if_else(omnicare == 1, "After Omnicare", "Before Omnicare"),
+         Period = factor(Period, levels = c("Before Omnicare", "After Omnicare"))) %>% 
+  ggplot(aes(x = rf_fact_t07, y = pop)) + 
+  geom_point() + 
+  geom_smooth() + 
+  labs(x = "Fact/Opinion", y = "One-Day \n Price Change") + 
+  theme(axis.title.y = element_text(hjust = 0.5, vjust = 0.5, angle = 360)) + 
+  facet_wrap(~Period)
+
+```
+
+Not clear from the scatter plot whether there are large difference in the mapping frunction from fact/opinion to underpricing.
+
+Next, we can do the binscatter by period:
+
+```{r, message = FALSE, warning = FALSE, error = FALSE}
+#| fig.align = 'center'
+
+# make a function to do binscatter by group
+get_scatter_group <- function(omni) {
+  # get x and y in vectors
+  x <- ipo_data %>% filter(omnicare == omni) %>% select(pop, rf_fact_t07) %>% drop_na() %>% pull(rf_fact_t07)
+  y <- ipo_data %>% filter(omnicare == omni) %>% select(pop, rf_fact_t07) %>% drop_na() %>% pull(pop)
+  # run binscatter
+  binscatter <- binsreg(y = y, x = x, ci = c(3, 3))
+  #save data
+  ggplot_build(binscatter$bins_plot)$data[[1]] %>% 
+    left_join(ggplot_build(binscatter$bins_plot)$data[[2]] %>% select(x, ymin, ymax)) %>% 
+    mutate(period = if_else(omni == 0, "Before Omnicare", "After Omnicare"),
+           period = factor(period, levels = c("Before Omnicare", "After Omnicare")))
+
+}
+
+# estimate it on before and after and save
+binscatters <- map_dfr(c(0, 1), get_scatter_group)
+
+binscatters %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_ribbon(aes(ymin = ymin, ymax = ymax), fill = "lightgrey") + 
+  geom_point(color = "darkred") + 
+  geom_smooth(se = FALSE, color = "darkred") + 
+  labs(x = "Fact/Opinion", y = "One-Day \n Price Change") + 
+  theme(axis.title.y = element_text(hjust = 0.5, vjust = 0.5, angle = 360)) + 
+  facet_wrap(~period)
+```
+
+Again, not clear it is all that different.
+
+Finally, let's look at the distribution results. This analysis comes again from Chernozhukov, Fernandez-Val, and Meilly. The key point is this: suppose we want to analyze the difference in the distribution of underpricing before and after the Omnicare decision. Let $Y_j$ denote underpricing and $X_j$ denote our fact-opinion variable that affects underpricing for populations $j = 0$ (before the Omnicare decision) and $j = 1$ after the Omnicare decision.
+
+The conditional distribution function $F_{Y_0|X_0}(y | x)$ and $F_{Y_1 | X_1}(y | x)$ describe the stochastic assignment of underpricing to firms with characteristics $x$, both before and after Omnicare respectively. $F_{Y\langle 0 | 0 \rangle}$ and $F_{Y\langle 1 | 1 \rangle}$ represent the observed distribution function of underpricing for firms that IPO before and after respectively. Here we can specify a counterfactual distirbution as $F_{Y\langle 0 | 1 \rangle}$ as the couterfactual distribution function of underpricing that would ahve prevailed for firms after Omnicare had they faced the same underpricing schedule as firms that IPOd before Omnicare ($F_{Y\langle 0 | 0 \rangle}$):
+
+$$ F_{Y\langle 0 | 1 \rangle} (y) = \int_{X_1} F_{Y\langle 0 | 0 \rangle} (y | x) d F_{X_1} (x).$$
+
+We don't observe this distribution in real life, rather it is constructed by integrating the conditional distribution of underpricing for firms before the IPO with respect to the distribution of our variable for firms that IPO after. What's nice about this method is that we can decompose the difference in the distributions of underpricing before and after Omnicare as:
+
+$$ F_{Y\langle 1 | 1 \rangle}  - F_{Y\langle 0 | 0 \rangle}= \left[F_{Y\langle 1 | 1 \rangle} - F_{Y\langle 0 | 1 \rangle} \right] + \left[F_{Y\langle 0 | 1 \rangle} - F_{Y\langle 0 | 0 \rangle}   \right]$$
+
+Here the first term in brackets is due to difference in the underpricing structure (i.e. how the market underprices an offering for a given level of information asymmetry) and the second term is the composition effect due to differences in the underlying asymmetry. We might care about both effects here: the first term shows how the market reactions changed to a given level of opinions in the risk statement, while the second term represents the difference in how frequently firms use opinions versus misstatements.
+
+First, let's look at the CDFs, and their differences, for the underpricing variables before and after.
+
+```{r, message = FALSE, warning = FALSE, error = FALSE, fig.height = 10}
+#| fig.align = 'center'
+cdf_analysis <- estimate_empirical_cdf(ipo_data, "pop", "omnicare", n_bootstrap = 1000)
+
+cdfs <- ggplot(cdf_analysis$cdf_results, aes(x = x_value, y = cdf_value, color = group_label, fill = group_label)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = cdf_lower, ymax = cdf_upper), alpha = 0.2) +
+  scale_color_manual(values = c("Before Omnicare" = "blue", "After Omnicare" = "red")) +
+  scale_fill_manual(values = c("Before Omnicare" = "blue", "After Omnicare" = "red")) +
+  ylim(0, 1) + 
+  xlim(-1, 2) + 
+  scale_y_continuous(labels = scales::percent) + 
+  labs(
+    title = "Cumulative Distribution Functions: Underpricing Before vs After Omnicare",
+    subtitle = "Distribution of Underpricing",
+    x = "pop (Higher values = More Underpricing)",
+    y = "Cumulative Probability F(pop)",
+    color = "Period",
+    fill = "Period",
+    caption = paste0("Ribbons show 95% bootstrap confidence intervals\n")
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "bottom"
+  )
+
+diff_cdfs <- ggplot(cdf_analysis$difference_results, aes(x = x_value, y = observed_difference)) +
+    geom_line(color = "darkgreen", size = 1.2) +
+    geom_ribbon(aes(ymin = diff_lower, ymax = diff_upper), alpha = 0.3, fill = "darkgreen") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.7) +
+    geom_point(aes(color = significant), size = 0.8) +
+    scale_color_manual(values = c("FALSE" = "gray", "TRUE" = "red"), 
+                       name = "Significant\n(|t| > 1.96)") +
+    labs(
+      title = "Difference in CDFs: After Omnicare - Before Omnicare",
+      subtitle = "With bootstrap confidence intervals and significance indicators",
+      x = "pop (Higher values = More Underpricing)",
+      y = "Difference in Cumulative Probability",
+      caption = paste0("Green ribbon: 95% bootstrap confidence intervals\n",
+                      "Red points: Statistically significant differences\n",
+                      "Mean absolute difference: ", round(mean(abs(cdf_analysis$difference_results$observed_difference)), 4))
+    ) +
+    xlim(-1, 2) + 
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      legend.position = "bottom"
+    )
+
+p1 <- cdfs / diff_cdfs + plot_layout(heights = 20)
+
+ggsave(here::here("plots_fordham", "change_density_underpricing.png"), p1,
+       width = 14, height = 7)
+
+p1
+```
+
+The differences aren't huge here, but it suggests that there is less underpricing in later years post-Omnicare.
+
+Finally, let's decompose these differences into its two constituent parts: the difference in the pricing structure (i.e. difference in how market would respond to the same level of fact/opinion) and the difference due to the change in the level of fact/opinion, holding the mapping the same.
+
+```{r, message = FALSE, warning = FALSE, error = FALSE, fig.height = 10}
+#| fig.align = 'center'
+
+# CFM Decomposition: Underpricing Changes After Omnicare
+# Following Chernozhukov, Fernandez-Val, and Melly (2013)
+# Decomposing changes in underpricing distribution into structure vs composition effects
+
+library(tidyverse)
+library(ggplot2)
+
+# Function to estimate conditional distribution using logit regression
+estimate_conditional_distribution <- function(data, outcome_var, covariate, y_grid = NULL) {
+  
+  if (is.null(y_grid)) {
+    y_values <- data[[outcome_var]]
+    y_grid <- quantile(y_values, probs = seq(0.05, 0.95, by = 0.05), na.rm = TRUE)
+    y_grid <- unique(y_grid)
+  }
+  
+  distribution_results <- list()
+  successful_fits <- c()
+  
+  for (j in seq_along(y_grid)) {
+    y_threshold <- y_grid[j]
+    
+    temp_data <- data
+    temp_data$binary_indicator <- as.numeric(data[[outcome_var]] <= y_threshold)
+    
+    prop_below <- mean(temp_data$binary_indicator)
+    if (prop_below == 0 || prop_below == 1) next
+    
+    tryCatch({
+      logit_formula <- as.formula(paste("binary_indicator ~", covariate))
+      logit_fit <- glm(logit_formula, family = binomial(link = "logit"), data = temp_data)
+      
+      if (!logit_fit$converged) next
+      
+      distribution_results[[length(distribution_results) + 1]] <- list(
+        y_threshold = y_threshold,
+        fit = logit_fit,
+        coefficients = coef(logit_fit)
+      )
+      
+      successful_fits <- c(successful_fits, y_threshold)
+      
+    }, error = function(e) {
+      # Silent error handling
+    })
+  }
+  
+  return(list(
+    distribution_results = distribution_results,
+    y_grid = successful_fits
+  ))
+}
+
+# Function to predict conditional CDF given covariates and estimated models
+predict_conditional_cdf <- function(distribution_results, covariate_values, y_grid) {
+  
+  n_obs <- length(covariate_values)
+  n_thresholds <- length(y_grid)
+  
+  cdf_matrix <- matrix(NA, nrow = n_obs, ncol = n_thresholds)
+  
+  # Extract actual thresholds from distribution_results
+  actual_thresholds <- sapply(distribution_results, function(x) x$y_threshold)
+  
+  for (i in 1:n_thresholds) {
+    # Find the matching result for this y_grid threshold
+    match_idx <- which(abs(actual_thresholds - y_grid[i]) < 1e-10)
+    
+    if (length(match_idx) == 1) {
+      coefs <- distribution_results[[match_idx]]$coefficients
+      if (length(coefs) >= 2) {
+        linear_pred <- coefs[1] + coefs[2] * covariate_values
+        cdf_matrix[, i] <- plogis(linear_pred)
+      }
+    }
+  }
+  
+  return(cdf_matrix)
+}
+# Function to estimate marginal CDF from conditional CDF and covariate distribution
+estimate_marginal_cdf <- function(conditional_cdf_matrix, y_grid) {
+  # Average over all observations (integrate over covariate distribution)
+  marginal_cdf <- colMeans(conditional_cdf_matrix, na.rm = TRUE)
+  
+  return(data.frame(
+    y_threshold = y_grid,
+    cdf_value = marginal_cdf
+  ))
+}
+
+# Function to perform CFM decomposition
+cfm_decomposition <- function(data, outcome_var, covariate, group_var, y_grid = NULL) {
+  
+  # Split data by groups
+  before_data <- data[data[[group_var]] == 0 & !is.na(data[[outcome_var]]) & !is.na(data[[covariate]]), ]
+  after_data <- data[data[[group_var]] == 1 & !is.na(data[[outcome_var]]) & !is.na(data[[covariate]]), ]
+  
+  # Create common y_grid based on COMBINED data to ensure overlap
+  if (is.null(y_grid)) {
+    all_outcome_values <- c(before_data[[outcome_var]], after_data[[outcome_var]])
+    y_grid <- quantile(all_outcome_values, probs = seq(0.05, 0.95, by = 0.05), na.rm = TRUE)
+    y_grid <- unique(y_grid)
+  }
+
+  # F_{Y|X}^{before}(y|x) and F_{Y|X}^{after}(y|x)
+  cond_dist_before <- estimate_conditional_distribution(before_data, outcome_var, covariate, y_grid)
+  cond_dist_after <- estimate_conditional_distribution(after_data, outcome_var, covariate, y_grid)
+  
+  # Check how many thresholds worked for each period
+  before_successful <- length(cond_dist_before$y_grid)
+  after_successful <- length(cond_dist_after$y_grid)
+  
+  # Use intersection of successful fits, but they should be much more similar now
+  common_y_grid <- intersect(cond_dist_before$y_grid, cond_dist_after$y_grid)
+  
+  if (length(common_y_grid) < 5) {
+    print("Warning: Few common thresholds. Trying alternative approach...")
+    
+    # Alternative: Use the same grid for both but handle failures differently
+    common_y_grid <- y_grid
+    
+    # Re-estimate with more lenient criteria or different approach
+    # For now, let's continue with what we have
+    if (length(common_y_grid) < 5) {
+      stop(paste("Insufficient common thresholds for decomposition. Only", length(common_y_grid), "available."))
+    }
+  }
+  
+  # Find indices of common thresholds in each result set
+  before_indices <- match(common_y_grid, cond_dist_before$y_grid)
+  after_indices <- match(common_y_grid, cond_dist_after$y_grid)
+  
+  # Remove NAs
+  valid_indices <- !is.na(before_indices) & !is.na(after_indices)
+  common_y_grid <- common_y_grid[valid_indices]
+  before_indices <- before_indices[valid_indices]
+  after_indices <- after_indices[valid_indices]
+  
+  if (length(common_y_grid) < 5) {
+    stop(paste("After matching, insufficient thresholds available:", length(common_y_grid)))
+  }
+  
+  # Extract results for common grid
+  before_results <- cond_dist_before$distribution_results[before_indices]
+  after_results <- cond_dist_after$distribution_results[after_indices]
+  
+  # Extract covariate values for each period
+  X_before <- before_data[[covariate]]
+  X_after <- after_data[[covariate]]
+  
+  # Calculate the four distributions for decomposition:
+  
+  # 1. F^{before|before}: Observed before distribution
+  cdf_before_given_before <- predict_conditional_cdf(before_results, X_before, common_y_grid)
+  F_before_before <- estimate_marginal_cdf(cdf_before_given_before, common_y_grid)
+  
+  # 2. F^{after|after}: Observed after distribution  
+  cdf_after_given_after <- predict_conditional_cdf(after_results, X_after, common_y_grid)
+  F_after_after <- estimate_marginal_cdf(cdf_after_given_after, common_y_grid)
+  
+  # 3. F^{before|after}: Counterfactual - before structure with after composition
+  cdf_before_given_after <- predict_conditional_cdf(before_results, X_after, common_y_grid)
+  F_before_after <- estimate_marginal_cdf(cdf_before_given_after, common_y_grid)
+  
+  # 4. F^{after|before}: Counterfactual - after structure with before composition  
+  cdf_after_given_before <- predict_conditional_cdf(after_results, X_before, common_y_grid)
+  F_after_before <- estimate_marginal_cdf(cdf_after_given_before, common_y_grid)
+  
+  # Decomposition:
+  # Total change = F^{after|after} - F^{before|before}
+  # = [F^{after|after} - F^{before|after}] + [F^{before|after} - F^{before|before}]
+  # = Structure Effect + Composition Effect
+  
+  total_change <- F_after_after$cdf_value - F_before_before$cdf_value
+  structure_effect <- F_after_after$cdf_value - F_before_after$cdf_value
+  composition_effect <- F_before_after$cdf_value - F_before_before$cdf_value
+  
+  # Alternative decomposition (order matters, so we can do both):
+  # Total change = [F^{after|before} - F^{before|before}] + [F^{after|after} - F^{after|before}]
+  # = Structure Effect + Composition Effect (alternative)
+  
+  structure_effect_alt <- F_after_before$cdf_value - F_before_before$cdf_value
+  composition_effect_alt <- F_after_after$cdf_value - F_after_before$cdf_value
+  
+  # Create results dataframe
+  decomposition_results <- data.frame(
+    y_threshold = common_y_grid,
+    F_before_before = F_before_before$cdf_value,
+    F_after_after = F_after_after$cdf_value,
+    F_before_after = F_before_after$cdf_value,
+    F_after_before = F_after_before$cdf_value,
+    total_change = total_change,
+    structure_effect = structure_effect,
+    composition_effect = composition_effect,
+    structure_effect_alt = structure_effect_alt,
+    composition_effect_alt = composition_effect_alt
+  )
+  
+  return(list(
+    decomposition = decomposition_results,
+    sample_sizes = list(before = nrow(before_data), after = nrow(after_data)),
+    y_grid = common_y_grid
+  ))
+}
+
+# Function to bootstrap the decomposition for confidence intervals
+bootstrap_cfm_decomposition <- function(data, outcome_var, covariate, group_var, y_grid = NULL, n_bootstrap = 100) {
+  
+  # Original decomposition
+  original_results <- cfm_decomposition(data, outcome_var, covariate, group_var, y_grid)
+  y_grid_common <- original_results$y_grid
+  
+  # Bootstrap
+  bootstrap_results <- list()
+  
+  for (b in 1:n_bootstrap) {
+    tryCatch({
+      # Sample with replacement within each group
+      before_data <- data[data[[group_var]] == 0 & !is.na(data[[outcome_var]]) & !is.na(data[[covariate]]), ]
+      after_data <- data[data[[group_var]] == 1 & !is.na(data[[outcome_var]]) & !is.na(data[[covariate]]), ]
+      
+      before_boot <- before_data[sample(nrow(before_data), replace = TRUE), ]
+      after_boot <- after_data[sample(nrow(after_data), replace = TRUE), ]
+      
+      boot_data <- rbind(before_boot, after_boot)
+      
+      boot_results <- cfm_decomposition(boot_data, outcome_var, covariate, group_var, y_grid_common)
+      bootstrap_results[[b]] <- boot_results$decomposition
+      
+    }, error = function(e) {
+      # Silent error handling
+    })
+  }
+  
+  # Remove failed bootstrap iterations
+  bootstrap_results <- bootstrap_results[!sapply(bootstrap_results, is.null)]
+  
+  if (length(bootstrap_results) > 10) {
+    # Calculate confidence intervals
+    n_successful <- length(bootstrap_results)
+    n_thresholds <- length(y_grid_common)
+    
+    # Extract bootstrap values
+    total_change_boot <- matrix(NA, n_successful, n_thresholds)
+    structure_boot <- matrix(NA, n_successful, n_thresholds)
+    composition_boot <- matrix(NA, n_successful, n_thresholds)
+    
+    for (i in 1:n_successful) {
+      if (nrow(bootstrap_results[[i]]) == n_thresholds) {
+        total_change_boot[i, ] <- bootstrap_results[[i]]$total_change
+        structure_boot[i, ] <- bootstrap_results[[i]]$structure_effect
+        composition_boot[i, ] <- bootstrap_results[[i]]$composition_effect
+      }
+    }
+    
+    # Calculate confidence intervals
+    total_ci_lower <- apply(total_change_boot, 2, quantile, 0.025, na.rm = TRUE)
+    total_ci_upper <- apply(total_change_boot, 2, quantile, 0.975, na.rm = TRUE)
+    structure_ci_lower <- apply(structure_boot, 2, quantile, 0.025, na.rm = TRUE)
+    structure_ci_upper <- apply(structure_boot, 2, quantile, 0.975, na.rm = TRUE)
+    composition_ci_lower <- apply(composition_boot, 2, quantile, 0.025, na.rm = TRUE)
+    composition_ci_upper <- apply(composition_boot, 2, quantile, 0.975, na.rm = TRUE)
+    
+    # Add CIs to original results
+    original_results$decomposition$total_ci_lower <- total_ci_lower
+    original_results$decomposition$total_ci_upper <- total_ci_upper
+    original_results$decomposition$structure_ci_lower <- structure_ci_lower
+    original_results$decomposition$structure_ci_upper <- structure_ci_upper
+    original_results$decomposition$composition_ci_lower <- composition_ci_lower
+    original_results$decomposition$composition_ci_upper <- composition_ci_upper
+      }
+  
+  return(original_results)
+}
+
+# Run with bootstrap
+decomp_results <- bootstrap_cfm_decomposition(
+  data = ipo_data,
+  outcome_var = "pop", 
+  covariate = "rf_fact_t07",
+  group_var = "omnicare",
+  n_bootstrap = 1000  # Reduce for speed, increase for final analysis
+)
+
+# get decomp data
+decomp_data <- decomp_results$decomposition
+
+# Plot 1: All four distributions
+dist_long <- decomp_data %>%
+  select(y_threshold, F_before_before, F_after_after, F_before_after, F_after_before) %>%
+  pivot_longer(cols = -y_threshold, names_to = "distribution", values_to = "cdf_value") %>%
+  mutate(
+    dist_label = case_when(
+      distribution == "F_before_before" ~ "Observed Before",
+      distribution == "F_after_after" ~ "Observed After", 
+      distribution == "F_before_after" ~ "Before Structure, After Composition",
+      distribution == "F_after_before" ~ "After Structure, Before Composition"
+    ),
+    dist_type = case_when(
+      distribution %in% c("F_before_before", "F_after_after") ~ "Observed",
+      TRUE ~ "Counterfactual"
+    )
+  )
+
+p1 <- ggplot(dist_long, aes(x = y_threshold, y = cdf_value, color = dist_label, linetype = dist_type)) +
+  geom_line(size = 1.1) +
+  scale_linetype_manual(values = c("Observed" = "solid", "Counterfactual" = "dashed")) +
+  scale_color_manual(values = c(
+    "Observed Before" = "blue",
+    "Observed After" = "red", 
+    "Before Structure, After Composition" = "green",
+    "After Structure, Before Composition" = "purple"
+  )) +
+  labs(
+    title = "CFM Decomposition: All Distribution Functions",
+    subtitle = "Observed and counterfactual CDFs for underpricing",
+    x = "Underpricing Level",
+    y = "Cumulative Probability F(underpricing)",
+    color = "Distribution",
+    linetype = "Type"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "bottom"
+  ) +
+  guides(color = guide_legend(nrow = 2))
+
+# Plot 2: Decomposition effects
+effect_long <- decomp_data %>%
+  select(y_threshold, total_change, structure_effect, composition_effect) %>%
+  pivot_longer(cols = -y_threshold, names_to = "effect_type", values_to = "effect_value") %>%
+  mutate(
+    effect_label = case_when(
+      effect_type == "total_change" ~ "Total Change",
+      effect_type == "structure_effect" ~ "Structure Effect",
+      effect_type == "composition_effect" ~ "Composition Effect"
+    )
+  )
+
+# Add confidence intervals if available
+if ("total_ci_lower" %in% names(decomp_data)) {
+  
+  p2 <- ggplot() +
+    # Add confidence intervals as ribbons first (so they appear behind lines)
+    geom_ribbon(data = decomp_data, 
+                aes(x = y_threshold, ymin = total_ci_lower, ymax = total_ci_upper), 
+                fill = "black", alpha = 0.2) +
+    geom_ribbon(data = decomp_data, 
+                aes(x = y_threshold, ymin = structure_ci_lower, ymax = structure_ci_upper), 
+                fill = "red", alpha = 0.2) +
+    geom_ribbon(data = decomp_data, 
+                aes(x = y_threshold, ymin = composition_ci_lower, ymax = composition_ci_upper), 
+                fill = "blue", alpha = 0.2) +
+    # Add lines on top
+    geom_line(data = effect_long, 
+              aes(x = y_threshold, y = effect_value, color = effect_label), 
+              size = 1.2) +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+    scale_color_manual(values = c("Total Change" = "black", "Structure Effect" = "red", "Composition Effect" = "blue")) +
+    labs(
+      title = "CFM Decomposition Effects with Bootstrap Confidence Intervals",
+      subtitle = "Total change = Structure effect + Composition effect",
+      x = "Underpricing Level", 
+      y = "Change in Cumulative Probability",
+      color = "Effect Type",
+      caption = "Shaded areas show 95% bootstrap confidence intervals"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      legend.position = "bottom"
+    )
+} else {
+  p2 <- ggplot(effect_long, aes(x = y_threshold, y = effect_value, color = effect_label)) +
+    geom_line(size = 1.2) +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+    scale_color_manual(values = c("Total Change" = "black", "Structure Effect" = "red", "Composition Effect" = "blue")) +
+    labs(
+      title = "CFM Decomposition Effects",
+      subtitle = "Total change = Structure effect + Composition effect",
+      x = "Underpricing Level",
+      y = "Change in Cumulative Probability", 
+      color = "Effect Type"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      legend.position = "bottom"
+    )
+}
+p1 / p2 + plot_layout(heights = 20)
+
+ggsave(here::here("plots_fordham", "omnicare_decomp.png"), p2,
+                  width = 8, height = 5)
+```
+
+So what we see here is that the total decomp (in black) is just what we saw before (just looking at fewer cut points). After omnicare we saw less underpricing (more mass at the lower end). If we look at the portion of this that can be explained by the changing market structure (i.e. how the market prices an offering for a given level of opinion/fact) that explains most of it, and the changing composition (because firms issued more opinions) would have cut in the opposite direction (the blue and red line need to add up to the black line).
+
+How do we rationalize this? Remember, Omnicare arguably cut in two directions. The Sixth Circuit had said firms could get sued for opinions, the Supreme Court overturned. This would arguably increase information asymmetry there. However, for the Second and Ninth Circuits they had previously argued that opinions were non-actionable, and in the decision Kagan gave numerous ways that plaintiffs could plead opinions as actionable (because either the party didn't hold the belief, or because they ommitted information in the opinion that a rational person would want to know). Given that more firms reside in the Second and Ninth Circuit it is perhaps not surprising that actually Omnicare made it more likely that you could get sued for opinions there. In fact, there is suggestive evidence that this is true:
+
+Here is Senor Chatgpt:
+
+Broadly, yes — Omnicare expanded the ways a plaintiff can plead that an opinion in a registration statement (or, later, other securities filings) is misleading, and that shift made opinion‑based claims more viable in the Second and Ninth Circuits, which had previously set a higher bar.
+
+**Why the bar was higher pre‑Omnicare.** In both circuits, cases like *Fait v. Regions Financial* (2d Cir. 2011) and *Rubke v. Capitol Bancorp* (9th Cir. 2008) held that liability attached only if an opinion was *both* objectively wrong *and* not honestly believed by the speaker (“subjective falsity”). Those decisions routinely led district courts to dismiss Section 11 suits at the pleading stage because plaintiffs could rarely show the issuer’s state of mind. ([Paul, Weiss](https://www.paulweiss.com/media/102918/26Aug11_Fait.pdf?utm_source=chatgpt.com "Second Circuit Establishes More Stringent Pleading ... - Paul, Weiss"), [Ninth Circuit Court of Appeals](https://cdn.ca9.uscourts.gov/datastore/opinions/2009/01/12/0715083.pdf?utm_source=chatgpt.com "[PDF] Rubke v. Capitol Bancorp Ltd. - Ninth Circuit"))
+
+**What Omnicare changed.** In 2015 the Supreme Court said a plaintiff may also proceed under an *omissions* theory: an opinion can be misleading if the issuer withholds facts that “conflict with what a reasonable investor would take from the statement,” even when the speaker sincerely believes the opinion. ([Harvard Law Corporate Governance Forum](https://corpgov.law.harvard.edu/2015/03/31/supreme-courts-omnicare-decision-muddies-section-11-opinion-liability-standards/?utm_source=chatgpt.com "Supreme Court's Omnicare Decision Muddies Section 11 Opinion ...")) That new path to liability overruled the Second and Ninth Circuits’ prior bright‑line rule to the extent it foreclosed omission claims.
+
+**Aftermath in the Second and Ninth Circuits.** Both courts quickly acknowledged the broader standard. The Second Circuit’s first post‑Omnicare decision (*Tongue v. Sanofi*, 2016) held that plaintiffs no longer need to plead subjective disbelief when they allege omitted contrary facts, though it ultimately found the complaint before it deficient. ([Hunton Andrews Kurth](https://www.hunton.com/insights/legal/applying-omnicare-the-second-circuit-weighs-in-on-statement-of-opinion-liability-post-omnicare?utm_source=chatgpt.com "Applying Omnicare: The Second Circuit Weighs in on Statement of ...")) The Ninth Circuit did the same in *City of Dearborn Heights v. Align Technology* (2017), expressly extending Omnicare’s three‑part framework to Section 10(b) and Rule 10b‑5 as well. Since then, district courts in both circuits have allowed a number of opinion‑based suits to survive motions to dismiss where plaintiffs could point to undisclosed, material contrary information.
+
+**Bottom line.** Omnicare did not create an automatic cause of action, and many claims are still dismissed for failure to identify a concrete omitted fact or to meet PSLRA scienter and loss‑causation requirements. But compared with the pre‑2015 regime, plaintiffs in the Second and Ninth Circuits now have an additional, less onerous pleading avenue. In that practical sense, it *is* more likely today than before Omnicare that an issuer headquartered in those circuits can be sued (or, more precisely, that such a suit can survive the initial motion to dismiss) over allegedly misleading statements of opinion.
