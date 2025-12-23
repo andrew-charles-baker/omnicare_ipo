@@ -520,6 +520,7 @@ distribution_regression <- function(data, x_var, y_var,
 ```{r}
 #| label: dist-reg-full
 #| fig-cap: "Distribution Regression Marginal Effects (Full Sample)"
+#| warning: false
 
 dr_full <- distribution_regression(df, "rf_fact_t07", "first_day_return", n_thresholds = 25)
 
@@ -544,6 +545,7 @@ ggplot(dr_full, aes(x = threshold, y = marginal_effect)) +
 ```{r}
 #| label: dist-reg-pre
 #| fig-cap: "Distribution Regression Marginal Effects (Pre-Omnicare)"
+#| warning: false
 
 dr_pre <- distribution_regression(df[!df$post_omnicare, ], "rf_fact_t07", "first_day_return",
                                   n_thresholds = 20)
@@ -569,6 +571,7 @@ ggplot(dr_pre, aes(x = threshold, y = marginal_effect)) +
 ```{r}
 #| label: dist-reg-post
 #| fig-cap: "Distribution Regression Marginal Effects (Post-Omnicare)"
+#| warning: false
 
 dr_post <- distribution_regression(df[df$post_omnicare, ], "rf_fact_t07", "first_day_return",
                                    n_thresholds = 25)
@@ -927,6 +930,7 @@ distribution_regression_controls <- function(data, x_var, y_var, controls,
 ```{r}
 #| label: dist-reg-full-controls
 #| fig-cap: "Distribution Regression with Controls (Full Sample)"
+#| warning: false
 
 # Define control variables (excluding ff12 which is a factor - handle separately)
 # For simplicity, we'll use the numeric controls and ff12 as factor
@@ -997,6 +1001,7 @@ ggplot(dr_compare, aes(x = threshold, y = marginal_effect,
 ```{r}
 #| label: dist-reg-periods-controls
 #| fig-cap: "Distribution Regression by Period (With Controls)"
+#| warning: false
 
 dr_pre_ctrl <- distribution_regression_controls(
   df_complete[!df_complete$post_omnicare, ],
