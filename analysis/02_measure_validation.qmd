@@ -47,12 +47,135 @@ df <- df_raw[df_raw$offer_price >= 5, ]  # Restrict to offer price >= $5
 df$post_omnicare <- as.Date(df$offer_date) >= as.Date("2015-03-24")
 df$period <- ifelse(df$post_omnicare, "Post-Omnicare", "Pre-Omnicare")
 
+# ============================================================================
+# Fama-French 12 Industry Classification
+# Source: Kenneth French Data Library
+# https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/Data_Library/det_12_ind_port.html
+# ============================================================================
+
+assign_ff12 <- function(sic) {
+  # Returns Fama-French 12 industry classification based on SIC code
+  # Returns NA if SIC is missing
+
+  if (is.na(sic)) return(NA_character_)
+  sic <- as.integer(sic)
+
+  # 1. Consumer NonDurables
+  if ((sic >= 100 & sic <= 999) |
+      (sic >= 2000 & sic <= 2399) |
+      (sic >= 2700 & sic <= 2749) |
+      (sic >= 2770 & sic <= 2799) |
+      (sic >= 3100 & sic <= 3199) |
+      (sic >= 3940 & sic <= 3989)) {
+    return("NoDur")
+  }
+
+  # 2. Consumer Durables
+  if ((sic >= 2500 & sic <= 2519) |
+      (sic >= 2590 & sic <= 2599) |
+      (sic >= 3630 & sic <= 3659) |
+      (sic >= 3710 & sic <= 3711) |
+      (sic == 3714) |
+      (sic == 3716) |
+      (sic >= 3750 & sic <= 3751) |
+      (sic == 3792) |
+      (sic >= 3900 & sic <= 3939) |
+      (sic >= 3990 & sic <= 3999)) {
+    return("Durbl")
+  }
+
+  # 3. Manufacturing
+  if ((sic >= 2520 & sic <= 2589) |
+      (sic >= 2600 & sic <= 2699) |
+      (sic >= 2750 & sic <= 2769) |
+      (sic >= 3000 & sic <= 3099) |
+      (sic >= 3200 & sic <= 3569) |
+      (sic >= 3580 & sic <= 3629) |
+      (sic >= 3700 & sic <= 3709) |
+      (sic >= 3712 & sic <= 3713) |
+      (sic == 3715) |
+      (sic >= 3717 & sic <= 3749) |
+      (sic >= 3752 & sic <= 3791) |
+      (sic >= 3793 & sic <= 3799) |
+      (sic >= 3830 & sic <= 3839) |
+      (sic >= 3860 & sic <= 3899)) {
+    return("Manuf")
+  }
+
+  # 4. Energy (Oil, Gas, Coal)
+  if ((sic >= 1200 & sic <= 1399) |
+      (sic >= 2900 & sic <= 2999)) {
+    return("Enrgy")
+  }
+
+  # 5. Chemicals
+  if ((sic >= 2800 & sic <= 2829) |
+      (sic >= 2840 & sic <= 2899)) {
+    return("Chems")
+  }
+
+  # 6. Business Equipment (Computers, Software, Electronics)
+  if ((sic >= 3570 & sic <= 3579) |
+      (sic >= 3660 & sic <= 3692) |
+      (sic >= 3694 & sic <= 3699) |
+      (sic >= 3810 & sic <= 3829) |
+      (sic >= 7370 & sic <= 7379)) {
+    return("BusEq")
+  }
+
+  # 7. Telecommunications
+  if (sic >= 4800 & sic <= 4899) {
+    return("Telcm")
+  }
+
+  # 8. Utilities
+  if (sic >= 4900 & sic <= 4949) {
+    return("Utils")
+  }
+
+  # 9. Wholesale/Retail (Shops)
+  if ((sic >= 5000 & sic <= 5999) |
+      (sic >= 7200 & sic <= 7299) |
+      (sic >= 7600 & sic <= 7699)) {
+    return("Shops")
+  }
+
+  # 10. Healthcare (Medical Equipment, Drugs)
+  if ((sic >= 2830 & sic <= 2839) |
+      (sic == 3693) |
+      (sic >= 3840 & sic <= 3859) |
+      (sic >= 8000 & sic <= 8099)) {
+    return("Hlth")
+  }
+
+  # 11. Finance
+  if (sic >= 6000 & sic <= 6999) {
+    return("Money")
+  }
+
+  # 12. Other
+  return("Other")
+}
+
+# Apply FF12 classification
+df$ff12 <- sapply(df$sic_code, assign_ff12)
+df$ff12 <- factor(df$ff12, levels = c("NoDur", "Durbl", "Manuf", "Enrgy", "Chems",
+                                       "BusEq", "Telcm", "Utils", "Shops", "Hlth",
+                                       "Money", "Other"))
+
+# Log-transform size variables (adding small constant to avoid log(0))
+df$log_assets <- log(df$assets_thous + 1)
+df$log_proceeds <- log(df$total_proceeds_thous + 1)
+
 # Sample sizes
 cat("Sample restriction: offer_price >= $5\n")
 cat("Original sample:", nrow(df_raw), "| Restricted sample:", nrow(df), "\n\n")
 cat("Full sample:", nrow(df), "\n")
 cat("Pre-Omnicare:", sum(!df$post_omnicare), "\n")
 cat("Post-Omnicare:", sum(df$post_omnicare), "\n")
+
+cat("\n=== Fama-French 12 Industry Distribution ===\n")
+print(table(df$ff12, useNA = "ifany"))
 ```
 
 ---
@@ -554,3 +677,396 @@ $$\frac{\partial P(Y > \tau | X = \bar{x})}{\partial x} = \beta \cdot \Lambda(\a
 evaluated at the sample mean of rf_fact_t07. This gives the actual change in probability (not log-odds) for a one-unit increase in fact-intensity. Bootstrap confidence intervals (200 replications) are computed using weighted bootstrap with exponential weights.
 
 Reference: Chernozhukov, V., Fernández-Val, I., & Melly, B. (2013). "Inference on Counterfactual Distributions." *Econometrica*, 81(6), 2205-2268.
+
+---
+
+## 5. Covariate-Controlled Analysis
+
+This section augments the baseline analysis by controlling for observable firm characteristics:
+
+- **Log Assets** (`log_assets`): Natural log of total assets (in thousands)
+- **Log Total Proceeds** (`log_proceeds`): Natural log of total IPO proceeds (in thousands)
+- **Industry Fixed Effects** (`ff12`): Fama-French 12 industry classification based on SIC codes
+- **Rolling Market Return** (`roll_vwretd`): Value-weighted market return in the 30 days prior to IPO
+
+These controls help isolate the relationship between fact-intensity and first-day returns from confounding factors related to firm size, deal size, industry characteristics, and market conditions.
+
+### 5.1 OLS with Controls
+
+```{r}
+#| label: ols-controls
+#| message: false
+
+# Check for missing values in control variables
+cat("=== Missing Values in Control Variables ===\n")
+cat("log_assets:", sum(is.na(df$log_assets)), "\n")
+cat("log_proceeds:", sum(is.na(df$log_proceeds)), "\n")
+cat("roll_vwretd:", sum(is.na(df$roll_vwretd)), "\n")
+cat("ff12:", sum(is.na(df$ff12)), "\n")
+
+# Complete cases for covariate analysis
+df_complete <- df[complete.cases(df[, c("first_day_return", "rf_fact_t07",
+                                         "log_assets", "log_proceeds",
+                                         "roll_vwretd", "ff12")]), ]
+cat("\nObservations with complete covariate data:", nrow(df_complete), "\n")
+
+# Full sample with controls
+model_full_ctrl <- lm(first_day_return ~ rf_fact_t07 + log_assets + log_proceeds +
+                        roll_vwretd + ff12, data = df_complete)
+
+# Pre-Omnicare with controls
+model_pre_ctrl <- lm(first_day_return ~ rf_fact_t07 + log_assets + log_proceeds +
+                       roll_vwretd + ff12, data = df_complete[!df_complete$post_omnicare, ])
+
+# Post-Omnicare with controls
+model_post_ctrl <- lm(first_day_return ~ rf_fact_t07 + log_assets + log_proceeds +
+                        roll_vwretd + ff12, data = df_complete[df_complete$post_omnicare, ])
+
+cat("\n=== FULL SAMPLE (with controls) ===\n")
+summary(model_full_ctrl)
+```
+
+### Comparison: Baseline vs. Controlled
+
+```{r}
+#| label: ols-comparison
+
+# Extract rf_fact_t07 coefficients
+extract_rf_coef <- function(model) {
+  coefs <- summary(model)$coefficients
+  if ("rf_fact_t07" %in% rownames(coefs)) {
+    return(c(coef = coefs["rf_fact_t07", 1],
+             se = coefs["rf_fact_t07", 2],
+             t = coefs["rf_fact_t07", 3],
+             p = coefs["rf_fact_t07", 4]))
+  }
+  return(c(coef = NA, se = NA, t = NA, p = NA))
+}
+
+comparison <- data.frame(
+  Sample = rep(c("Full Sample", "Pre-Omnicare", "Post-Omnicare"), 2),
+  Specification = c(rep("Baseline", 3), rep("With Controls", 3)),
+  Coefficient = c(
+    coef(model_full)[2], coef(model_pre)[2], coef(model_post)[2],
+    extract_rf_coef(model_full_ctrl)["coef"],
+    extract_rf_coef(model_pre_ctrl)["coef"],
+    extract_rf_coef(model_post_ctrl)["coef"]
+  ),
+  Std_Error = c(
+    summary(model_full)$coefficients[2, 2],
+    summary(model_pre)$coefficients[2, 2],
+    summary(model_post)$coefficients[2, 2],
+    extract_rf_coef(model_full_ctrl)["se"],
+    extract_rf_coef(model_pre_ctrl)["se"],
+    extract_rf_coef(model_post_ctrl)["se"]
+  ),
+  p_value = c(
+    summary(model_full)$coefficients[2, 4],
+    summary(model_pre)$coefficients[2, 4],
+    summary(model_post)$coefficients[2, 4],
+    extract_rf_coef(model_full_ctrl)["p"],
+    extract_rf_coef(model_pre_ctrl)["p"],
+    extract_rf_coef(model_post_ctrl)["p"]
+  )
+)
+
+knitr::kable(comparison, digits = 4,
+             caption = "Effect of Fact-Intensity on First-Day Returns: Baseline vs. Controlled",
+             col.names = c("Sample", "Specification", "Coefficient", "Std. Error", "p-value"))
+```
+
+### Control Variable Effects
+
+```{r}
+#| label: control-effects
+
+cat("=== CONTROL VARIABLE COEFFICIENTS (Full Sample) ===\n\n")
+coef_table <- summary(model_full_ctrl)$coefficients
+print(round(coef_table, 4))
+
+cat("\n=== INTERPRETATION OF CONTROLS ===\n")
+cat("\nlog_assets: Larger firms by assets tend to have",
+    ifelse(coef(model_full_ctrl)["log_assets"] < 0, "LOWER", "HIGHER"),
+    "first-day returns\n")
+cat("log_proceeds: Larger deals tend to have",
+    ifelse(coef(model_full_ctrl)["log_proceeds"] < 0, "LOWER", "HIGHER"),
+    "first-day returns\n")
+cat("roll_vwretd: Hot markets (higher prior returns) are associated with",
+    ifelse(coef(model_full_ctrl)["roll_vwretd"] < 0, "LOWER", "HIGHER"),
+    "first-day returns\n")
+```
+
+### 5.2 Distribution Regression with Controls
+
+We extend the distribution regression to include covariates. For each threshold $\tau$, we estimate:
+
+$$P(\text{FirstDayReturn}_i > \tau) = \Lambda(\alpha_\tau + \beta_\tau \cdot \text{rf\_fact\_t07}_i + \gamma_\tau' \mathbf{X}_i)$$
+
+where $\mathbf{X}_i$ includes log assets, log proceeds, rolling market return, and industry fixed effects.
+
+```{r}
+#| label: dist-reg-controls-function
+
+# Distribution regression with controls
+distribution_regression_controls <- function(data, x_var, y_var, controls,
+                                              thresholds = NULL, n_thresholds = 20,
+                                              n_bootstrap = 200) {
+
+  # Build formula
+  formula_str <- paste("y_binary ~", x_var, "+", paste(controls, collapse = " + "))
+
+  y <- data[[y_var]]
+  x <- data[[x_var]]
+
+  # Remove missing values
+  vars_needed <- c(y_var, x_var, controls)
+  complete_idx <- complete.cases(data[, vars_needed])
+  data_clean <- data[complete_idx, ]
+  y <- data_clean[[y_var]]
+  x <- data_clean[[x_var]]
+  n <- nrow(data_clean)
+
+  # Evaluation point: sample means
+  x_mean <- mean(x, na.rm = TRUE)
+
+  # Default thresholds: quantiles of y
+  if (is.null(thresholds)) {
+    thresholds <- quantile(y, probs = seq(0.05, 0.95, length.out = n_thresholds), na.rm = TRUE)
+    thresholds <- unique(thresholds)
+  }
+
+  results <- data.frame(
+    threshold = numeric(),
+    coefficient = numeric(),
+    marginal_effect = numeric(),
+    me_lower = numeric(),
+    me_upper = numeric(),
+    prop_above = numeric()
+  )
+
+  for (tau in thresholds) {
+    # Binary outcome: 1 if y > tau
+    data_clean$y_binary <- as.integer(data_clean[[y_var]] > tau)
+
+    # Skip if all same value
+    if (length(unique(data_clean$y_binary)) < 2) next
+
+    # Logistic regression with controls
+    tryCatch({
+      model <- glm(as.formula(formula_str), data = data_clean,
+                   family = binomial(link = "logit"))
+      coefs <- coef(model)
+
+      if (any(is.na(coefs)) || !(x_var %in% names(coefs))) next
+
+      # Marginal effect at sample mean for rf_fact_t07
+      # Need to compute linear predictor at mean values
+      newdata_mean <- data.frame(lapply(data_clean[, vars_needed[-1], drop = FALSE],
+                                         function(col) {
+                                           if (is.numeric(col)) mean(col, na.rm = TRUE)
+                                           else names(which.max(table(col)))
+                                         }))
+
+      # For factor variables, use the reference level prediction
+      linear_pred <- predict(model, newdata = newdata_mean, type = "link")
+      lambda_val <- plogis(linear_pred)
+      beta_rf <- coefs[x_var]
+      marginal_effect <- beta_rf * lambda_val * (1 - lambda_val)
+
+      # Bootstrap for confidence intervals
+      boot_me <- numeric(n_bootstrap)
+      for (b in 1:n_bootstrap) {
+        weights <- rexp(n, rate = 1)
+
+        tryCatch({
+          boot_fit <- glm(as.formula(formula_str), data = data_clean,
+                          family = binomial(link = "logit"), weights = weights)
+          boot_coefs <- coef(boot_fit)
+          if (!any(is.na(boot_coefs)) && x_var %in% names(boot_coefs)) {
+            boot_lp <- predict(boot_fit, newdata = newdata_mean, type = "link")
+            boot_lambda <- plogis(boot_lp)
+            boot_me[b] <- boot_coefs[x_var] * boot_lambda * (1 - boot_lambda)
+          } else {
+            boot_me[b] <- NA
+          }
+        }, error = function(e) {
+          boot_me[b] <- NA
+        })
+      }
+
+      # Calculate bootstrap CI
+      boot_me_clean <- boot_me[!is.na(boot_me)]
+      if (length(boot_me_clean) > 10) {
+        me_lower <- quantile(boot_me_clean, 0.025)
+        me_upper <- quantile(boot_me_clean, 0.975)
+      } else {
+        me_lower <- NA
+        me_upper <- NA
+      }
+
+      results <- rbind(results, data.frame(
+        threshold = tau,
+        coefficient = beta_rf,
+        marginal_effect = marginal_effect,
+        me_lower = me_lower,
+        me_upper = me_upper,
+        prop_above = mean(data_clean$y_binary, na.rm = TRUE)
+      ))
+
+    }, error = function(e) {
+      # Skip this threshold on error
+    })
+  }
+
+  return(results)
+}
+```
+
+### Full Sample with Controls
+
+```{r}
+#| label: dist-reg-full-controls
+#| fig-cap: "Distribution Regression with Controls (Full Sample)"
+
+# Define control variables (excluding ff12 which is a factor - handle separately)
+# For simplicity, we'll use the numeric controls and ff12 as factor
+controls <- c("log_assets", "log_proceeds", "roll_vwretd", "ff12")
+
+dr_full_ctrl <- distribution_regression_controls(
+  df_complete, "rf_fact_t07", "first_day_return",
+  controls, n_thresholds = 25, n_bootstrap = 200
+)
+
+ggplot(dr_full_ctrl, aes(x = threshold, y = marginal_effect)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper),
+              alpha = 0.2, fill = "darkgreen") +
+  geom_line(color = "darkgreen", linewidth = 1) +
+  geom_point(color = "darkgreen", size = 2) +
+  labs(
+    title = "Distribution Regression with Controls: Full Sample",
+    subtitle = "Controlling for log(assets), log(proceeds), roll_vwretd, and FF12 industry FE",
+    x = "First-Day Return Threshold",
+    y = "Marginal Effect ∂P/∂rf_fact"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### Comparison: Baseline vs. Controlled Distribution Regression
+
+```{r}
+#| label: dist-reg-comparison
+#| fig-cap: "Distribution Regression: Baseline vs. With Controls"
+#| fig-height: 6
+
+# Add labels
+dr_full$specification <- "Baseline"
+dr_full_ctrl$specification <- "With Controls"
+
+dr_compare <- rbind(
+  dr_full[, c("threshold", "marginal_effect", "me_lower", "me_upper", "specification")],
+  dr_full_ctrl[, c("threshold", "marginal_effect", "me_lower", "me_upper", "specification")]
+)
+
+ggplot(dr_compare, aes(x = threshold, y = marginal_effect,
+                        color = specification, fill = specification)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper), alpha = 0.15, color = NA) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("Baseline" = "steelblue", "With Controls" = "darkgreen")) +
+  scale_fill_manual(values = c("Baseline" = "steelblue", "With Controls" = "darkgreen")) +
+  labs(
+    title = "Distribution Regression: Effect of Adding Controls",
+    subtitle = "Full sample | Marginal effect of rf_fact_t07 on P(Return > threshold)",
+    x = "First-Day Return Threshold",
+    y = "Marginal Effect ∂P/∂rf_fact",
+    color = "Specification",
+    fill = "Specification"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+### Pre vs. Post-Omnicare with Controls
+
+```{r}
+#| label: dist-reg-periods-controls
+#| fig-cap: "Distribution Regression by Period (With Controls)"
+
+dr_pre_ctrl <- distribution_regression_controls(
+  df_complete[!df_complete$post_omnicare, ],
+  "rf_fact_t07", "first_day_return",
+  controls, n_thresholds = 20, n_bootstrap = 200
+)
+
+dr_post_ctrl <- distribution_regression_controls(
+  df_complete[df_complete$post_omnicare, ],
+  "rf_fact_t07", "first_day_return",
+  controls, n_thresholds = 25, n_bootstrap = 200
+)
+
+dr_pre_ctrl$period <- "Pre-Omnicare"
+dr_post_ctrl$period <- "Post-Omnicare"
+dr_periods_ctrl <- rbind(dr_pre_ctrl, dr_post_ctrl)
+
+ggplot(dr_periods_ctrl, aes(x = threshold, y = marginal_effect,
+                             color = period, fill = period)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_ribbon(aes(ymin = me_lower, ymax = me_upper), alpha = 0.15, color = NA) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+  scale_fill_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+  labs(
+    title = "Distribution Regression: Pre vs. Post-Omnicare (With Controls)",
+    subtitle = "Controlling for log(assets), log(proceeds), roll_vwretd, and FF12 industry FE",
+    x = "First-Day Return Threshold",
+    y = "Marginal Effect ∂P/∂rf_fact",
+    color = "Period",
+    fill = "Period"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+### 5.3 Summary of Covariate Analysis
+
+```{r}
+#| label: covariate-summary
+
+cat("=== COVARIATE-CONTROLLED ANALYSIS SUMMARY ===\n\n")
+
+cat("Controls included:\n")
+cat("  - log(assets_thous): Firm size proxy\n")
+cat("  - log(total_proceeds_thous): Deal size\n")
+cat("  - roll_vwretd: Market conditions (30-day rolling VW return)\n")
+cat("  - ff12: Fama-French 12 industry fixed effects\n\n")
+
+cat("Sample sizes:\n")
+cat("  - Full sample (complete cases):", nrow(df_complete), "\n")
+cat("  - Pre-Omnicare:", sum(!df_complete$post_omnicare), "\n")
+cat("  - Post-Omnicare:", sum(df_complete$post_omnicare), "\n\n")
+
+cat("Key findings:\n")
+baseline_coef <- coef(model_full)[2]
+controlled_coef <- coef(model_full_ctrl)["rf_fact_t07"]
+cat(sprintf("  - Baseline rf_fact_t07 coefficient: %.4f\n", baseline_coef))
+cat(sprintf("  - Controlled rf_fact_t07 coefficient: %.4f\n", controlled_coef))
+cat(sprintf("  - Change: %.4f (%.1f%%)\n",
+            controlled_coef - baseline_coef,
+            100 * (controlled_coef - baseline_coef) / abs(baseline_coef)))
+
+if (sign(baseline_coef) == sign(controlled_coef)) {
+  cat("\nThe sign of the rf_fact_t07 effect is ROBUST to the inclusion of controls.\n")
+} else {
+  cat("\nWARNING: The sign of the rf_fact_t07 effect CHANGES with the inclusion of controls.\n")
+}
+```
