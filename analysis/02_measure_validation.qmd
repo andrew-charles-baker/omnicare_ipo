@@ -1842,3 +1842,457 @@ The counterfactual $F_{Y\langle 0|1 \rangle}$ is constructed by applying the pre
 $$F_{Y\langle 0|1 \rangle}(y) = \frac{1}{n_1} \sum_{i: \text{post}} F_{Y|X}^{\text{pre}}(y | X_i)$$
 
 Reference: Chernozhukov, V., Fernández-Val, I., & Melly, B. (2013). "Inference on Counterfactual Distributions." *Econometrica*, 81(6), 2205-2268.
+
+---
+
+## 7. Full CFM Decomposition with Multiple Covariates
+
+Following CFM (2013), we now decompose the total change into three components:
+
+1. **Structure Effect**: Changes in how the market prices IPOs (the conditional distribution $F_{Y|X}$)
+2. **rf_fact Composition Effect**: Changes due to shifts in the fact-intensity distribution
+3. **Other Composition Effect**: Changes due to shifts in other covariates (assets, proceeds, market conditions, industry)
+
+The sequential decomposition path is:
+$$F_{Y\langle 1|1 \rangle} - F_{Y\langle 0|0 \rangle} = \underbrace{[F_{Y\langle 1|1 \rangle} - F_{Y\langle 0|1 \rangle}]}_{\text{Structure}} + \underbrace{[F_{Y\langle 0|1 \rangle} - F_{Y\langle 0|\text{rf}_1, \text{other}_0 \rangle}]}_{\text{Other Composition}} + \underbrace{[F_{Y\langle 0|\text{rf}_1, \text{other}_0 \rangle} - F_{Y\langle 0|0 \rangle}]}_{\text{rf\_fact Composition}}$$
+
+```{r}
+#| label: cfm-full-functions
+#| warning: false
+
+# Function to estimate conditional distribution with multiple covariates
+estimate_cond_dist_multi <- function(data, outcome_var, covariates, y_grid = NULL) {
+
+  if (is.null(y_grid)) {
+    y_values <- data[[outcome_var]]
+    y_grid <- quantile(y_values, probs = seq(0.05, 0.95, by = 0.05), na.rm = TRUE)
+    y_grid <- unique(y_grid)
+  }
+
+  distribution_results <- list()
+  successful_fits <- c()
+
+  for (j in seq_along(y_grid)) {
+    y_threshold <- y_grid[j]
+
+    temp_data <- data
+    temp_data$binary_indicator <- as.numeric(data[[outcome_var]] <= y_threshold)
+
+    prop_below <- mean(temp_data$binary_indicator)
+    if (prop_below < 0.02 || prop_below > 0.98) next
+
+    tryCatch({
+      # Build formula with all covariates
+      formula_str <- paste("binary_indicator ~", paste(covariates, collapse = " + "))
+      logit_formula <- as.formula(formula_str)
+      logit_fit <- glm(logit_formula, family = binomial(link = "logit"), data = temp_data)
+
+      if (!logit_fit$converged) next
+
+      distribution_results[[length(distribution_results) + 1]] <- list(
+        y_threshold = y_threshold,
+        fit = logit_fit
+      )
+
+      successful_fits <- c(successful_fits, y_threshold)
+
+    }, error = function(e) {
+      # Silent error handling
+    })
+  }
+
+  return(list(
+    distribution_results = distribution_results,
+    y_grid = successful_fits
+  ))
+}
+
+# Function to predict CDF given model and covariate matrix
+predict_cdf_multi <- function(distribution_results, newdata, y_grid) {
+
+  n_obs <- nrow(newdata)
+  n_thresholds <- length(y_grid)
+  cdf_matrix <- matrix(NA, nrow = n_obs, ncol = n_thresholds)
+
+  actual_thresholds <- sapply(distribution_results, function(x) x$y_threshold)
+
+  for (i in 1:n_thresholds) {
+    match_idx <- which(abs(actual_thresholds - y_grid[i]) < 1e-10)
+
+    if (length(match_idx) == 1) {
+      fit <- distribution_results[[match_idx]]$fit
+      pred <- predict(fit, newdata = newdata, type = "response")
+      cdf_matrix[, i] <- pred
+    }
+  }
+
+  return(cdf_matrix)
+}
+
+# Main function for full CFM decomposition
+cfm_full_decomposition <- function(data, outcome_var, main_covariate, other_covariates,
+                                    group_var, y_grid = NULL) {
+
+  all_covariates <- c(main_covariate, other_covariates)
+
+  # Split data
+  before_data <- data[data[[group_var]] == FALSE, ]
+  after_data <- data[data[[group_var]] == TRUE, ]
+
+  # Remove NAs
+  before_data <- before_data[complete.cases(before_data[, c(outcome_var, all_covariates)]), ]
+  after_data <- after_data[complete.cases(after_data[, c(outcome_var, all_covariates)]), ]
+
+  # Create common y_grid
+  if (is.null(y_grid)) {
+    all_outcome <- c(before_data[[outcome_var]], after_data[[outcome_var]])
+    y_grid <- quantile(all_outcome, probs = seq(0.05, 0.95, by = 0.05), na.rm = TRUE)
+    y_grid <- unique(y_grid)
+  }
+
+  # Estimate conditional distributions for each period
+  cond_dist_before <- estimate_cond_dist_multi(before_data, outcome_var, all_covariates, y_grid)
+  cond_dist_after <- estimate_cond_dist_multi(after_data, outcome_var, all_covariates, y_grid)
+
+  # Use intersection of successful fits
+  common_y_grid <- intersect(cond_dist_before$y_grid, cond_dist_after$y_grid)
+
+  if (length(common_y_grid) < 5) {
+    stop("Insufficient common thresholds for decomposition.")
+  }
+
+  # Get results for common grid
+  before_thresh <- sapply(cond_dist_before$distribution_results, function(x) x$y_threshold)
+  after_thresh <- sapply(cond_dist_after$distribution_results, function(x) x$y_threshold)
+
+  before_idx <- match(common_y_grid, before_thresh)
+  after_idx <- match(common_y_grid, after_thresh)
+
+  before_results <- cond_dist_before$distribution_results[before_idx]
+  after_results <- cond_dist_after$distribution_results[after_idx]
+
+  # Prepare covariate data frames for counterfactuals
+  X_before <- before_data[, all_covariates, drop = FALSE]
+  X_after <- after_data[, all_covariates, drop = FALSE]
+
+  # Create hybrid covariate set: rf_fact from post, other covariates from pre
+  # We need to match the sample sizes, so we'll resample
+  set.seed(42)
+  n_counterfactual <- min(nrow(X_before), nrow(X_after))
+
+  # Sample indices
+  before_sample_idx <- sample(1:nrow(X_before), n_counterfactual, replace = TRUE)
+  after_sample_idx <- sample(1:nrow(X_after), n_counterfactual, replace = TRUE)
+
+  # X_hybrid: rf_fact from post, other covariates from pre
+  X_hybrid <- X_before[before_sample_idx, , drop = FALSE]
+  X_hybrid[[main_covariate]] <- X_after[after_sample_idx, main_covariate]
+
+  # Calculate the four distributions:
+
+  # 1. F^{0|0}: Observed before - pre pricing, pre covariates
+  cdf_00 <- predict_cdf_multi(before_results, X_before, common_y_grid)
+  F_00 <- colMeans(cdf_00, na.rm = TRUE)
+
+  # 2. F^{1|1}: Observed after - post pricing, post covariates
+  cdf_11 <- predict_cdf_multi(after_results, X_after, common_y_grid)
+  F_11 <- colMeans(cdf_11, na.rm = TRUE)
+
+  # 3. F^{0|1}: Counterfactual - pre pricing, post covariates (all)
+  cdf_01 <- predict_cdf_multi(before_results, X_after, common_y_grid)
+  F_01 <- colMeans(cdf_01, na.rm = TRUE)
+
+  # 4. F^{0|rf_post, other_pre}: Counterfactual - pre pricing, post rf_fact, pre other
+  cdf_0_hybrid <- predict_cdf_multi(before_results, X_hybrid, common_y_grid)
+  F_0_hybrid <- colMeans(cdf_0_hybrid, na.rm = TRUE)
+
+  # Decomposition
+  total_change <- F_11 - F_00
+  structure_effect <- F_11 - F_01
+  other_composition <- F_01 - F_0_hybrid
+  rf_composition <- F_0_hybrid - F_00
+
+  # Verify: total = structure + other_comp + rf_comp
+  decomp_check <- structure_effect + other_composition + rf_composition
+
+  results <- data.frame(
+    y_threshold = common_y_grid,
+    F_00 = F_00,
+    F_11 = F_11,
+    F_01 = F_01,
+    F_0_hybrid = F_0_hybrid,
+    total_change = total_change,
+    structure_effect = structure_effect,
+    other_composition = other_composition,
+    rf_composition = rf_composition,
+    decomp_check = decomp_check
+  )
+
+  return(list(
+    decomposition = results,
+    sample_sizes = list(before = nrow(before_data), after = nrow(after_data)),
+    y_grid = common_y_grid
+  ))
+}
+
+# Bootstrap version
+bootstrap_cfm_full <- function(data, outcome_var, main_covariate, other_covariates,
+                                group_var, y_grid = NULL, n_bootstrap = 200) {
+
+  # Original decomposition
+  original <- cfm_full_decomposition(data, outcome_var, main_covariate,
+                                      other_covariates, group_var, y_grid)
+  y_grid_common <- original$y_grid
+
+  # Bootstrap
+  boot_results <- list()
+
+  for (b in 1:n_bootstrap) {
+    tryCatch({
+      # Sample with replacement within each group
+      before_data <- data[data[[group_var]] == FALSE, ]
+      after_data <- data[data[[group_var]] == TRUE, ]
+
+      before_boot <- before_data[sample(nrow(before_data), replace = TRUE), ]
+      after_boot <- after_data[sample(nrow(after_data), replace = TRUE), ]
+
+      boot_data <- rbind(before_boot, after_boot)
+
+      boot_decomp <- cfm_full_decomposition(boot_data, outcome_var, main_covariate,
+                                             other_covariates, group_var, y_grid_common)
+      boot_results[[b]] <- boot_decomp$decomposition
+
+    }, error = function(e) {
+      # Silent
+    })
+  }
+
+  # Remove failed iterations
+  boot_results <- boot_results[!sapply(boot_results, is.null)]
+
+  if (length(boot_results) > 10) {
+    n_success <- length(boot_results)
+    n_thresh <- length(y_grid_common)
+
+    # Extract bootstrap matrices
+    total_boot <- structure_boot <- other_boot <- rf_boot <- matrix(NA, n_success, n_thresh)
+
+    for (i in 1:n_success) {
+      if (nrow(boot_results[[i]]) == n_thresh) {
+        total_boot[i, ] <- boot_results[[i]]$total_change
+        structure_boot[i, ] <- boot_results[[i]]$structure_effect
+        other_boot[i, ] <- boot_results[[i]]$other_composition
+        rf_boot[i, ] <- boot_results[[i]]$rf_composition
+      }
+    }
+
+    # Calculate CIs
+    original$decomposition$total_ci_lower <- apply(total_boot, 2, quantile, 0.025, na.rm = TRUE)
+    original$decomposition$total_ci_upper <- apply(total_boot, 2, quantile, 0.975, na.rm = TRUE)
+    original$decomposition$structure_ci_lower <- apply(structure_boot, 2, quantile, 0.025, na.rm = TRUE)
+    original$decomposition$structure_ci_upper <- apply(structure_boot, 2, quantile, 0.975, na.rm = TRUE)
+    original$decomposition$other_ci_lower <- apply(other_boot, 2, quantile, 0.025, na.rm = TRUE)
+    original$decomposition$other_ci_upper <- apply(other_boot, 2, quantile, 0.975, na.rm = TRUE)
+    original$decomposition$rf_ci_lower <- apply(rf_boot, 2, quantile, 0.025, na.rm = TRUE)
+    original$decomposition$rf_ci_upper <- apply(rf_boot, 2, quantile, 0.975, na.rm = TRUE)
+  }
+
+  return(original)
+}
+```
+
+### Run Full Decomposition
+
+```{r}
+#| label: cfm-full-run
+#| warning: false
+#| fig-height: 8
+
+# Define covariates
+main_cov <- "rf_fact_t07"
+other_covs <- c("log_assets", "log_proceeds", "roll_vwretd")
+# Note: excluding ff12 factor for numerical stability; can add back if needed
+
+# Run decomposition with bootstrap
+full_decomp <- bootstrap_cfm_full(
+  data = df_complete,
+  outcome_var = "first_day_return",
+  main_covariate = main_cov,
+  other_covariates = other_covs,
+  group_var = "post_omnicare",
+  n_bootstrap = 300
+)
+
+decomp_full <- full_decomp$decomposition
+
+cat("=== FULL CFM DECOMPOSITION SUMMARY ===\n\n")
+cat("Sample sizes:\n")
+cat("  Pre-Omnicare:", full_decomp$sample_sizes$before, "\n")
+cat("  Post-Omnicare:", full_decomp$sample_sizes$after, "\n\n")
+
+cat("Average effects across distribution:\n")
+cat(sprintf("  Total change:        %7.4f\n", mean(decomp_full$total_change)))
+cat(sprintf("  Structure effect:    %7.4f\n", mean(decomp_full$structure_effect)))
+cat(sprintf("  rf_fact composition: %7.4f\n", mean(decomp_full$rf_composition)))
+cat(sprintf("  Other composition:   %7.4f\n", mean(decomp_full$other_composition)))
+cat(sprintf("  Check (should = total): %.4f\n", mean(decomp_full$decomp_check)))
+```
+
+### Plot: Full Three-Way Decomposition
+
+```{r}
+#| label: cfm-full-plot
+#| fig-cap: "Full CFM Decomposition: Structure, rf_fact, and Other Composition Effects"
+#| fig-height: 7
+#| warning: false
+
+# Reshape for plotting
+effect_long_full <- decomp_full |>
+  dplyr::select(y_threshold, total_change, structure_effect, rf_composition, other_composition) |>
+  tidyr::pivot_longer(cols = -y_threshold, names_to = "effect_type", values_to = "effect_value") |>
+  dplyr::mutate(
+    effect_label = dplyr::case_when(
+      effect_type == "total_change" ~ "Total Change",
+      effect_type == "structure_effect" ~ "Structure Effect (Pricing)",
+      effect_type == "rf_composition" ~ "rf_fact Composition",
+      effect_type == "other_composition" ~ "Other Covariates Composition"
+    ),
+    effect_label = factor(effect_label, levels = c(
+      "Total Change", "Structure Effect (Pricing)",
+      "rf_fact Composition", "Other Covariates Composition"
+    ))
+  )
+
+# Check if CIs available
+has_ci <- "total_ci_lower" %in% names(decomp_full)
+
+if (has_ci) {
+  ggplot() +
+    # Confidence ribbons
+    geom_ribbon(data = decomp_full,
+                aes(x = y_threshold, ymin = total_ci_lower, ymax = total_ci_upper),
+                fill = "black", alpha = 0.12) +
+    geom_ribbon(data = decomp_full,
+                aes(x = y_threshold, ymin = structure_ci_lower, ymax = structure_ci_upper),
+                fill = "red", alpha = 0.12) +
+    geom_ribbon(data = decomp_full,
+                aes(x = y_threshold, ymin = rf_ci_lower, ymax = rf_ci_upper),
+                fill = "blue", alpha = 0.12) +
+    geom_ribbon(data = decomp_full,
+                aes(x = y_threshold, ymin = other_ci_lower, ymax = other_ci_upper),
+                fill = "darkgreen", alpha = 0.12) +
+    # Effect lines
+    geom_line(data = effect_long_full,
+              aes(x = y_threshold, y = effect_value, color = effect_label),
+              linewidth = 1.2) +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+    scale_color_manual(values = c(
+      "Total Change" = "black",
+      "Structure Effect (Pricing)" = "red",
+      "rf_fact Composition" = "blue",
+      "Other Covariates Composition" = "darkgreen"
+    )) +
+    labs(
+      title = "Full CFM Decomposition: Three-Way Attribution",
+      subtitle = "Total = Structure + rf_fact Composition + Other Composition",
+      x = "First-Day Return Threshold",
+      y = "Change in Cumulative Probability",
+      color = "Effect Type",
+      caption = "Shaded areas: 95% bootstrap confidence intervals\nOther covariates: log(assets), log(proceeds), roll_vwretd"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      legend.position = "bottom"
+    ) +
+    guides(color = guide_legend(nrow = 2))
+} else {
+  ggplot(effect_long_full, aes(x = y_threshold, y = effect_value, color = effect_label)) +
+    geom_line(linewidth = 1.2) +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+    scale_color_manual(values = c(
+      "Total Change" = "black",
+      "Structure Effect (Pricing)" = "red",
+      "rf_fact Composition" = "blue",
+      "Other Covariates Composition" = "darkgreen"
+    )) +
+    labs(
+      title = "Full CFM Decomposition: Three-Way Attribution",
+      subtitle = "Total = Structure + rf_fact Composition + Other Composition",
+      x = "First-Day Return Threshold",
+      y = "Change in Cumulative Probability",
+      color = "Effect Type"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      legend.position = "bottom"
+    ) +
+    guides(color = guide_legend(nrow = 2))
+}
+```
+
+### Interpretation of Full Decomposition
+
+```{r}
+#| label: cfm-full-interpretation
+
+cat("=== FULL DECOMPOSITION INTERPRETATION ===\n\n")
+
+avg_total <- mean(decomp_full$total_change)
+avg_structure <- mean(decomp_full$structure_effect)
+avg_rf <- mean(decomp_full$rf_composition)
+avg_other <- mean(decomp_full$other_composition)
+
+# Direction of total change
+if (avg_total > 0) {
+  cat("TOTAL CHANGE (", round(avg_total, 4), "): Post-Omnicare has MORE mass at lower returns.\n")
+} else {
+  cat("TOTAL CHANGE (", round(avg_total, 4), "): Post-Omnicare has LESS mass at lower returns.\n")
+}
+
+cat("\nDECOMPOSITION INTO THREE COMPONENTS:\n\n")
+
+# Structure effect
+cat("1. STRUCTURE EFFECT (", round(avg_structure, 4), "):\n")
+cat("   How the market's PRICING FUNCTION changed, holding covariates fixed.\n")
+if (avg_structure > 0) {
+  cat("   → For same firm characteristics, post-Omnicare pricing yields LESS underpricing.\n")
+} else {
+  cat("   → For same firm characteristics, post-Omnicare pricing yields MORE underpricing.\n")
+}
+
+# rf_fact composition
+cat("\n2. rf_fact COMPOSITION EFFECT (", round(avg_rf, 4), "):\n")
+cat("   Effect of the shift in fact-intensity distribution, holding pricing & other X fixed.\n")
+
+# Get actual rf_fact direction
+rf_pre <- mean(df_complete[!df_complete$post_omnicare, "rf_fact_t07"], na.rm = TRUE)
+rf_post <- mean(df_complete[df_complete$post_omnicare, "rf_fact_t07"], na.rm = TRUE)
+rf_direction <- ifelse(rf_post > rf_pre, "increased (more facts)", "decreased (more opinions)")
+
+cat(sprintf("   Fact: rf_fact %s (%.3f → %.3f)\n", rf_direction, rf_pre, rf_post))
+if (avg_rf > 0) {
+  cat("   → The rf_fact shift alone would have pushed toward LESS underpricing.\n")
+} else {
+  cat("   → The rf_fact shift alone would have pushed toward MORE underpricing.\n")
+}
+
+# Other composition
+cat("\n3. OTHER COVARIATES COMPOSITION EFFECT (", round(avg_other, 4), "):\n")
+cat("   Effect of shifts in assets, proceeds, and market conditions.\n")
+if (avg_other > 0) {
+  cat("   → Changes in other firm/market characteristics → LESS underpricing.\n")
+} else {
+  cat("   → Changes in other firm/market characteristics → MORE underpricing.\n")
+}
+
+# Relative contributions
+cat("\n=== RELATIVE CONTRIBUTIONS ===\n")
+total_abs <- abs(avg_structure) + abs(avg_rf) + abs(avg_other)
+if (total_abs > 0) {
+  cat(sprintf("  Structure effect:      %5.1f%%\n", 100 * abs(avg_structure) / total_abs))
+  cat(sprintf("  rf_fact composition:   %5.1f%%\n", 100 * abs(avg_rf) / total_abs))
+  cat(sprintf("  Other composition:     %5.1f%%\n", 100 * abs(avg_other) / total_abs))
+}
+```
