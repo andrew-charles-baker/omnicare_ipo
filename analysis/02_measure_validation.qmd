@@ -2168,19 +2168,19 @@ has_ci <- "total_ci_lower" %in% names(decomp_full)
 
 if (has_ci) {
   ggplot() +
-    # Confidence ribbons
+    # Confidence ribbons (alpha increased for visibility)
     geom_ribbon(data = decomp_full,
                 aes(x = y_threshold, ymin = total_ci_lower, ymax = total_ci_upper),
-                fill = "black", alpha = 0.12) +
+                fill = "black", alpha = 0.20) +
     geom_ribbon(data = decomp_full,
                 aes(x = y_threshold, ymin = structure_ci_lower, ymax = structure_ci_upper),
-                fill = "red", alpha = 0.12) +
+                fill = "red", alpha = 0.20) +
     geom_ribbon(data = decomp_full,
                 aes(x = y_threshold, ymin = rf_ci_lower, ymax = rf_ci_upper),
-                fill = "blue", alpha = 0.12) +
+                fill = "blue", alpha = 0.20) +
     geom_ribbon(data = decomp_full,
                 aes(x = y_threshold, ymin = other_ci_lower, ymax = other_ci_upper),
-                fill = "darkgreen", alpha = 0.12) +
+                fill = "darkgreen", alpha = 0.20) +
     # Effect lines
     geom_line(data = effect_long_full,
               aes(x = y_threshold, y = effect_value, color = effect_label),
@@ -2295,4 +2295,268 @@ if (total_abs > 0) {
   cat(sprintf("  rf_fact composition:   %5.1f%%\n", 100 * abs(avg_rf) / total_abs))
   cat(sprintf("  Other composition:     %5.1f%%\n", 100 * abs(avg_other) / total_abs))
 }
+```
+
+---
+
+## 8. Circuit Heterogeneity Analysis
+
+Omnicare's impact varied by circuit. The **6th Circuit** (KY, MI, OH, TN) had previously held opinions actionable, so Omnicare *reduced* liability there. The **2nd and 9th Circuits** (CT, NY, VT + AK, AZ, CA, HI, ID, MT, NV, OR, WA) had previously treated opinions as non-actionable, so Omnicare *expanded* plaintiff avenues there.
+
+```{r}
+#| label: circuit-setup
+#| warning: false
+
+# Define circuit mappings
+sixth_circuit_states <- c("KY", "MI", "OH", "TN")
+
+second_circuit_states <- c("CT", "NY", "VT")
+ninth_circuit_states <- c("AK", "AZ", "CA", "HI", "ID", "MT", "NV", "OR", "WA")
+second_ninth_states <- c(second_circuit_states, ninth_circuit_states)
+
+# Create circuit indicator
+df_complete$circuit <- case_when(
+  df_complete$headquarter %in% sixth_circuit_states ~ "6th Circuit",
+  df_complete$headquarter %in% second_ninth_states ~ "2nd/9th Circuit",
+  TRUE ~ "Other"
+)
+
+# Summary
+cat("=== CIRCUIT DISTRIBUTION ===\n\n")
+circuit_summary <- df_complete %>%
+  group_by(circuit, post_omnicare) %>%
+  summarise(
+    n = n(),
+    mean_rf_fact = mean(rf_fact_t07, na.rm = TRUE),
+    mean_return = mean(first_day_return, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(period = ifelse(post_omnicare, "Post-Omnicare", "Pre-Omnicare"))
+
+print(circuit_summary %>% dplyr::select(circuit, period, n, mean_rf_fact, mean_return))
+```
+
+### Decomposition by Circuit
+
+```{r}
+#| label: circuit-decomposition
+#| warning: false
+#| fig-height: 10
+
+# Function to run decomposition for a subset
+run_circuit_decomposition <- function(data, circuit_name, n_boot = 200) {
+
+  # Check sample sizes
+  n_pre <- sum(!data$post_omnicare)
+  n_post <- sum(data$post_omnicare)
+
+  if (n_pre < 20 || n_post < 20) {
+    return(NULL)
+  }
+
+  tryCatch({
+    result <- bootstrap_cfm_full(
+      data = data,
+      outcome_var = "first_day_return",
+      main_covariate = "rf_fact_t07",
+      other_covariates = c("log_assets", "log_proceeds", "roll_vwretd"),
+      group_var = "post_omnicare",
+      n_bootstrap = n_boot
+    )
+    result$circuit <- circuit_name
+    return(result)
+  }, error = function(e) {
+    cat("Error for", circuit_name, ":", conditionMessage(e), "\n")
+    return(NULL)
+  })
+}
+
+# Run for 6th Circuit
+df_6th <- df_complete[df_complete$circuit == "6th Circuit", ]
+decomp_6th <- run_circuit_decomposition(df_6th, "6th Circuit", n_boot = 200)
+
+# Run for 2nd/9th Circuit
+df_2nd9th <- df_complete[df_complete$circuit == "2nd/9th Circuit", ]
+decomp_2nd9th <- run_circuit_decomposition(df_2nd9th, "2nd/9th Circuit", n_boot = 200)
+
+# Report sample sizes
+cat("\n=== SAMPLE SIZES FOR DECOMPOSITION ===\n")
+if (!is.null(decomp_6th)) {
+  cat("6th Circuit: Pre =", decomp_6th$sample_sizes$before,
+      ", Post =", decomp_6th$sample_sizes$after, "\n")
+}
+if (!is.null(decomp_2nd9th)) {
+  cat("2nd/9th Circuit: Pre =", decomp_2nd9th$sample_sizes$before,
+      ", Post =", decomp_2nd9th$sample_sizes$after, "\n")
+}
+```
+
+```{r}
+#| label: circuit-plot
+#| fig-cap: "CFM Decomposition by Circuit: 6th vs 2nd/9th"
+#| fig-height: 10
+#| warning: false
+
+# Combine results for plotting
+plot_list <- list()
+
+if (!is.null(decomp_6th)) {
+  decomp_6th_df <- decomp_6th$decomposition
+  decomp_6th_df$circuit <- "6th Circuit (Omnicare reduced liability)"
+
+  effect_6th <- decomp_6th_df %>%
+    dplyr::select(y_threshold, total_change, structure_effect, rf_composition, other_composition, circuit) %>%
+    tidyr::pivot_longer(cols = c(total_change, structure_effect, rf_composition, other_composition),
+                        names_to = "effect_type", values_to = "effect_value") %>%
+    dplyr::mutate(
+      effect_label = case_when(
+        effect_type == "total_change" ~ "Total Change",
+        effect_type == "structure_effect" ~ "Structure Effect",
+        effect_type == "rf_composition" ~ "rf_fact Composition",
+        effect_type == "other_composition" ~ "Other Composition"
+      )
+    )
+
+  # Check for CIs
+  has_ci_6th <- "total_ci_lower" %in% names(decomp_6th_df)
+
+  p_6th <- ggplot(effect_6th, aes(x = y_threshold, y = effect_value, color = effect_label)) +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5)
+
+  if (has_ci_6th) {
+    p_6th <- p_6th +
+      geom_ribbon(data = decomp_6th_df,
+                  aes(x = y_threshold, ymin = total_ci_lower, ymax = total_ci_upper),
+                  fill = "black", alpha = 0.15, inherit.aes = FALSE) +
+      geom_ribbon(data = decomp_6th_df,
+                  aes(x = y_threshold, ymin = structure_ci_lower, ymax = structure_ci_upper),
+                  fill = "red", alpha = 0.15, inherit.aes = FALSE) +
+      geom_ribbon(data = decomp_6th_df,
+                  aes(x = y_threshold, ymin = rf_ci_lower, ymax = rf_ci_upper),
+                  fill = "blue", alpha = 0.15, inherit.aes = FALSE) +
+      geom_ribbon(data = decomp_6th_df,
+                  aes(x = y_threshold, ymin = other_ci_lower, ymax = other_ci_upper),
+                  fill = "darkgreen", alpha = 0.15, inherit.aes = FALSE)
+  }
+
+  p_6th <- p_6th +
+    geom_line(linewidth = 1.1) +
+    scale_color_manual(values = c(
+      "Total Change" = "black",
+      "Structure Effect" = "red",
+      "rf_fact Composition" = "blue",
+      "Other Composition" = "darkgreen"
+    )) +
+    labs(
+      title = "6th Circuit (KY, MI, OH, TN)",
+      subtitle = "Omnicare REDUCED liability (overturned prior pro-plaintiff stance)",
+      x = "First-Day Return Threshold",
+      y = "Change in Cumulative Probability",
+      color = "Effect"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom", plot.title = element_text(face = "bold"))
+
+  plot_list[["6th"]] <- p_6th
+}
+
+if (!is.null(decomp_2nd9th)) {
+  decomp_2nd9th_df <- decomp_2nd9th$decomposition
+  decomp_2nd9th_df$circuit <- "2nd/9th Circuit (Omnicare expanded liability)"
+
+  effect_2nd9th <- decomp_2nd9th_df %>%
+    dplyr::select(y_threshold, total_change, structure_effect, rf_composition, other_composition, circuit) %>%
+    tidyr::pivot_longer(cols = c(total_change, structure_effect, rf_composition, other_composition),
+                        names_to = "effect_type", values_to = "effect_value") %>%
+    dplyr::mutate(
+      effect_label = case_when(
+        effect_type == "total_change" ~ "Total Change",
+        effect_type == "structure_effect" ~ "Structure Effect",
+        effect_type == "rf_composition" ~ "rf_fact Composition",
+        effect_type == "other_composition" ~ "Other Composition"
+      )
+    )
+
+  has_ci_2nd9th <- "total_ci_lower" %in% names(decomp_2nd9th_df)
+
+  p_2nd9th <- ggplot(effect_2nd9th, aes(x = y_threshold, y = effect_value, color = effect_label)) +
+    geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5)
+
+  if (has_ci_2nd9th) {
+    p_2nd9th <- p_2nd9th +
+      geom_ribbon(data = decomp_2nd9th_df,
+                  aes(x = y_threshold, ymin = total_ci_lower, ymax = total_ci_upper),
+                  fill = "black", alpha = 0.15, inherit.aes = FALSE) +
+      geom_ribbon(data = decomp_2nd9th_df,
+                  aes(x = y_threshold, ymin = structure_ci_lower, ymax = structure_ci_upper),
+                  fill = "red", alpha = 0.15, inherit.aes = FALSE) +
+      geom_ribbon(data = decomp_2nd9th_df,
+                  aes(x = y_threshold, ymin = rf_ci_lower, ymax = rf_ci_upper),
+                  fill = "blue", alpha = 0.15, inherit.aes = FALSE) +
+      geom_ribbon(data = decomp_2nd9th_df,
+                  aes(x = y_threshold, ymin = other_ci_lower, ymax = other_ci_upper),
+                  fill = "darkgreen", alpha = 0.15, inherit.aes = FALSE)
+  }
+
+  p_2nd9th <- p_2nd9th +
+    geom_line(linewidth = 1.1) +
+    scale_color_manual(values = c(
+      "Total Change" = "black",
+      "Structure Effect" = "red",
+      "rf_fact Composition" = "blue",
+      "Other Composition" = "darkgreen"
+    )) +
+    labs(
+      title = "2nd/9th Circuit (NY, CA, etc.)",
+      subtitle = "Omnicare EXPANDED liability (gave plaintiffs new avenues)",
+      x = "First-Day Return Threshold",
+      y = "Change in Cumulative Probability",
+      color = "Effect"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom", plot.title = element_text(face = "bold"))
+
+  plot_list[["2nd9th"]] <- p_2nd9th
+}
+
+# Combine plots
+if (length(plot_list) == 2) {
+  plot_list[["6th"]] / plot_list[["2nd9th"]] +
+    plot_layout(guides = "collect") &
+    theme(legend.position = "bottom")
+} else if (length(plot_list) == 1) {
+  plot_list[[1]]
+} else {
+  cat("Insufficient data for circuit-level decomposition\n")
+}
+```
+
+### Circuit Comparison Summary
+
+```{r}
+#| label: circuit-summary
+
+cat("=== CIRCUIT COMPARISON SUMMARY ===\n\n")
+
+if (!is.null(decomp_6th)) {
+  cat("6TH CIRCUIT (Omnicare reduced liability):\n")
+  cat(sprintf("  Total change:        %7.4f\n", mean(decomp_6th$decomposition$total_change)))
+  cat(sprintf("  Structure effect:    %7.4f\n", mean(decomp_6th$decomposition$structure_effect)))
+  cat(sprintf("  rf_fact composition: %7.4f\n", mean(decomp_6th$decomposition$rf_composition)))
+  cat(sprintf("  Other composition:   %7.4f\n\n", mean(decomp_6th$decomposition$other_composition)))
+}
+
+if (!is.null(decomp_2nd9th)) {
+  cat("2ND/9TH CIRCUIT (Omnicare expanded liability):\n")
+  cat(sprintf("  Total change:        %7.4f\n", mean(decomp_2nd9th$decomposition$total_change)))
+  cat(sprintf("  Structure effect:    %7.4f\n", mean(decomp_2nd9th$decomposition$structure_effect)))
+  cat(sprintf("  rf_fact composition: %7.4f\n", mean(decomp_2nd9th$decomposition$rf_composition)))
+  cat(sprintf("  Other composition:   %7.4f\n\n", mean(decomp_2nd9th$decomposition$other_composition)))
+}
+
+# Interpretation
+cat("INTERPRETATION:\n")
+cat("If Omnicare's legal impact drives the results, we expect:\n")
+cat("  - 6th Circuit: Reduced liability → possibly MORE opinions, different structure effect\n")
+cat("  - 2nd/9th Circuit: Expanded liability → possibly FEWER opinions, different structure effect\n")
 ```
