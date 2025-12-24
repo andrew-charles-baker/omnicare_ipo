@@ -1304,6 +1304,76 @@ Let $Y_j$ denote first-day returns and $X_j$ denote fact-intensity for period $j
 The decomposition is:
 $$F_{Y\langle 1|1 \rangle} - F_{Y\langle 0|0 \rangle} = \underbrace{\left[F_{Y\langle 1|1 \rangle} - F_{Y\langle 0|1 \rangle}\right]}_{\text{Structure Effect}} + \underbrace{\left[F_{Y\langle 0|1 \rangle} - F_{Y\langle 0|0 \rangle}\right]}_{\text{Composition Effect}}$$
 
+### Raw Distributional Shifts: Pre vs. Post Omnicare
+
+Before running the decomposition, let's visualize how both the covariate (rf_fact) and the outcome (first_day_return) actually shifted between periods. This helps us interpret the composition and structure effects.
+
+```{r}
+#| label: raw-distribution-shifts
+#| fig-cap: "Raw Distributional Shifts: Pre vs. Post Omnicare"
+#| fig-height: 8
+
+library(patchwork)
+
+# Prepare data
+df_pre_raw <- df[!df$post_omnicare, ]
+df_post_raw <- df[df$post_omnicare, ]
+
+# Panel A: rf_fact distribution (what drives composition effect)
+p_rf_cdf <- ggplot() +
+  stat_ecdf(data = df_pre_raw, aes(x = rf_fact_t07, color = "Pre-Omnicare"), linewidth = 1.2) +
+  stat_ecdf(data = df_post_raw, aes(x = rf_fact_t07, color = "Post-Omnicare"), linewidth = 1.2) +
+  scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+  labs(
+    title = "A. Covariate Distribution: Fact-Intensity (rf_fact_t07)",
+    subtitle = "This drives the COMPOSITION effect",
+    x = "Fact-Intensity (rf_fact_t07)",
+    y = "Cumulative Probability",
+    color = "Period"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom", plot.title = element_text(face = "bold"))
+
+# Panel B: First-day return distribution (the outcome)
+p_return_cdf <- ggplot() +
+  stat_ecdf(data = df_pre_raw, aes(x = first_day_return, color = "Pre-Omnicare"), linewidth = 1.2) +
+  stat_ecdf(data = df_post_raw, aes(x = first_day_return, color = "Post-Omnicare"), linewidth = 1.2) +
+  scale_color_manual(values = c("Pre-Omnicare" = "coral", "Post-Omnicare" = "steelblue")) +
+  coord_cartesian(xlim = c(-0.5, 1.5)) +  # Focus on main mass
+  labs(
+    title = "B. Outcome Distribution: First-Day Returns",
+    subtitle = "Total change = Structure + Composition",
+    x = "First-Day Return",
+    y = "Cumulative Probability",
+    color = "Period"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom", plot.title = element_text(face = "bold"))
+
+# Combine
+p_rf_cdf / p_return_cdf
+
+# Print summary statistics
+cat("=== DISTRIBUTIONAL SHIFT SUMMARY ===\n\n")
+cat("Fact-Intensity (rf_fact_t07):\n")
+cat(sprintf("  Pre-Omnicare mean:  %.4f\n", mean(df_pre_raw$rf_fact_t07, na.rm = TRUE)))
+cat(sprintf("  Post-Omnicare mean: %.4f\n", mean(df_post_raw$rf_fact_t07, na.rm = TRUE)))
+cat(sprintf("  Difference: %.4f (%s)\n\n",
+            mean(df_post_raw$rf_fact_t07, na.rm = TRUE) - mean(df_pre_raw$rf_fact_t07, na.rm = TRUE),
+            ifelse(mean(df_post_raw$rf_fact_t07, na.rm = TRUE) > mean(df_pre_raw$rf_fact_t07, na.rm = TRUE),
+                   "MORE facts post-Omnicare", "FEWER facts post-Omnicare")))
+
+cat("First-Day Returns:\n")
+cat(sprintf("  Pre-Omnicare mean:  %.4f (%.1f%%)\n", mean(df_pre_raw$first_day_return, na.rm = TRUE),
+            100 * mean(df_pre_raw$first_day_return, na.rm = TRUE)))
+cat(sprintf("  Post-Omnicare mean: %.4f (%.1f%%)\n", mean(df_post_raw$first_day_return, na.rm = TRUE),
+            100 * mean(df_post_raw$first_day_return, na.rm = TRUE)))
+cat(sprintf("  Difference: %.4f (%s)\n",
+            mean(df_post_raw$first_day_return, na.rm = TRUE) - mean(df_pre_raw$first_day_return, na.rm = TRUE),
+            ifelse(mean(df_post_raw$first_day_return, na.rm = TRUE) < mean(df_pre_raw$first_day_return, na.rm = TRUE),
+                   "LESS underpricing post-Omnicare", "MORE underpricing post-Omnicare")))
+```
+
 ```{r}
 #| label: cfm-functions
 #| warning: false
@@ -1731,15 +1801,20 @@ if (avg_structure > 0) {
   cat("  For the same level of fact-intensity, post-Omnicare IPOs have MORE underpricing.\n")
 }
 
-# Composition effect interpretation
+# Composition effect interpretation - use actual data to determine direction
+rf_pre_mean <- mean(df[!df$post_omnicare, "rf_fact_t07"], na.rm = TRUE)
+rf_post_mean <- mean(df[df$post_omnicare, "rf_fact_t07"], na.rm = TRUE)
+rf_shift_direction <- ifelse(rf_post_mean > rf_pre_mean, "increased (more facts)", "decreased (fewer facts)")
+
 if (avg_composition > 0) {
   cat("\n- COMPOSITION EFFECT (", round(avg_composition, 4), "): The distribution of rf_fact SHIFTED post-Omnicare.\n")
   cat("  Given the same pricing structure, changes in fact-intensity would have led to LESS underpricing.\n")
 } else {
   cat("\n- COMPOSITION EFFECT (", round(avg_composition, 4), "): The distribution of rf_fact SHIFTED post-Omnicare.\n")
   cat("  Given the same pricing structure, changes in fact-intensity would have led to MORE underpricing.\n")
-  cat("  This is consistent with firms shifting toward more opinion-based language post-Omnicare.\n")
 }
+cat(sprintf("  Fact: rf_fact %s post-Omnicare (pre mean: %.4f, post mean: %.4f)\n",
+            rf_shift_direction, rf_pre_mean, rf_post_mean))
 
 # Relative contributions
 total_abs <- abs(avg_structure) + abs(avg_composition)
