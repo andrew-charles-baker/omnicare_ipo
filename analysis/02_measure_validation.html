@@ -156,6 +156,7 @@ window.Quarto = {
   <li><a href="#cfm-distributional-decomposition" id="toc-cfm-distributional-decomposition" class="nav-link" data-scroll-target="#cfm-distributional-decomposition">6. CFM Distributional Decomposition</a>
   <ul class="collapse">
   <li><a href="#notation-and-setup" id="toc-notation-and-setup" class="nav-link" data-scroll-target="#notation-and-setup">Notation and Setup</a></li>
+  <li><a href="#raw-distributional-shifts-pre-vs.-post-omnicare" id="toc-raw-distributional-shifts-pre-vs.-post-omnicare" class="nav-link" data-scroll-target="#raw-distributional-shifts-pre-vs.-post-omnicare">Raw Distributional Shifts: Pre vs.&nbsp;Post Omnicare</a></li>
   <li><a href="#run-the-decomposition" id="toc-run-the-decomposition" class="nav-link" data-scroll-target="#run-the-decomposition">Run the Decomposition</a></li>
   <li><a href="#plot-all-four-distributions" id="toc-plot-all-four-distributions" class="nav-link" data-scroll-target="#plot-all-four-distributions">Plot: All Four Distributions</a></li>
   <li><a href="#plot-decomposition-effects" id="toc-plot-decomposition-effects" class="nav-link" data-scroll-target="#plot-decomposition-effects">Plot: Decomposition Effects</a></li>
@@ -2099,240 +2100,368 @@ The sign of the rf_fact_t07 effect is ROBUST to the inclusion of controls.</code
 <li><span class="math inline">\(F_{Y\langle 0|1 \rangle}\)</span>: <strong>Counterfactual</strong> - returns that would have prevailed post-Omnicare if the market still priced like pre-Omnicare</li>
 </ul>
 <p>The decomposition is: <span class="math display">\[F_{Y\langle 1|1 \rangle} - F_{Y\langle 0|0 \rangle} = \underbrace{\left[F_{Y\langle 1|1 \rangle} - F_{Y\langle 0|1 \rangle}\right]}_{\text{Structure Effect}} + \underbrace{\left[F_{Y\langle 0|1 \rangle} - F_{Y\langle 0|0 \rangle}\right]}_{\text{Composition Effect}}\]</span></p>
+</section>
+<section id="raw-distributional-shifts-pre-vs.-post-omnicare" class="level3">
+<h3 class="anchored" data-anchor-id="raw-distributional-shifts-pre-vs.-post-omnicare">Raw Distributional Shifts: Pre vs.&nbsp;Post Omnicare</h3>
+<p>Before running the decomposition, let’s visualize how both the covariate (rf_fact) and the outcome (first_day_return) actually shifted between periods. This helps us interpret the composition and structure effects.</p>
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb118"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb118-1"><a href="#cb118-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Function to estimate conditional distribution using logit regression</span></span>
-<span id="cb118-2"><a href="#cb118-2" aria-hidden="true" tabindex="-1"></a>estimate_conditional_distribution <span class="ot">&lt;-</span> <span class="cf">function</span>(data, outcome_var, covariate, <span class="at">y_grid =</span> <span class="cn">NULL</span>) {</span>
-<span id="cb118-3"><a href="#cb118-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-4"><a href="#cb118-4" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">is.null</span>(y_grid)) {</span>
-<span id="cb118-5"><a href="#cb118-5" aria-hidden="true" tabindex="-1"></a>    y_values <span class="ot">&lt;-</span> data[[outcome_var]]</span>
-<span id="cb118-6"><a href="#cb118-6" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">quantile</span>(y_values, <span class="at">probs =</span> <span class="fu">seq</span>(<span class="fl">0.05</span>, <span class="fl">0.95</span>, <span class="at">by =</span> <span class="fl">0.05</span>), <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-7"><a href="#cb118-7" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">unique</span>(y_grid)</span>
-<span id="cb118-8"><a href="#cb118-8" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb118-9"><a href="#cb118-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-10"><a href="#cb118-10" aria-hidden="true" tabindex="-1"></a>  distribution_results <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb118-11"><a href="#cb118-11" aria-hidden="true" tabindex="-1"></a>  successful_fits <span class="ot">&lt;-</span> <span class="fu">c</span>()</span>
-<span id="cb118-12"><a href="#cb118-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-13"><a href="#cb118-13" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (j <span class="cf">in</span> <span class="fu">seq_along</span>(y_grid)) {</span>
-<span id="cb118-14"><a href="#cb118-14" aria-hidden="true" tabindex="-1"></a>    y_threshold <span class="ot">&lt;-</span> y_grid[j]</span>
-<span id="cb118-15"><a href="#cb118-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-16"><a href="#cb118-16" aria-hidden="true" tabindex="-1"></a>    temp_data <span class="ot">&lt;-</span> data</span>
-<span id="cb118-17"><a href="#cb118-17" aria-hidden="true" tabindex="-1"></a>    temp_data<span class="sc">$</span>binary_indicator <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(data[[outcome_var]] <span class="sc">&lt;=</span> y_threshold)</span>
-<span id="cb118-18"><a href="#cb118-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-19"><a href="#cb118-19" aria-hidden="true" tabindex="-1"></a>    prop_below <span class="ot">&lt;-</span> <span class="fu">mean</span>(temp_data<span class="sc">$</span>binary_indicator)</span>
-<span id="cb118-20"><a href="#cb118-20" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (prop_below <span class="sc">==</span> <span class="dv">0</span> <span class="sc">||</span> prop_below <span class="sc">==</span> <span class="dv">1</span>) <span class="cf">next</span></span>
+<div class="sourceCode cell-code" id="cb118"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb118-1"><a href="#cb118-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(patchwork)</span>
+<span id="cb118-2"><a href="#cb118-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb118-3"><a href="#cb118-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Prepare data</span></span>
+<span id="cb118-4"><a href="#cb118-4" aria-hidden="true" tabindex="-1"></a>df_pre_raw <span class="ot">&lt;-</span> df[<span class="sc">!</span>df<span class="sc">$</span>post_omnicare, ]</span>
+<span id="cb118-5"><a href="#cb118-5" aria-hidden="true" tabindex="-1"></a>df_post_raw <span class="ot">&lt;-</span> df[df<span class="sc">$</span>post_omnicare, ]</span>
+<span id="cb118-6"><a href="#cb118-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb118-7"><a href="#cb118-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel A: rf_fact distribution (what drives composition effect)</span></span>
+<span id="cb118-8"><a href="#cb118-8" aria-hidden="true" tabindex="-1"></a>p_rf_cdf <span class="ot">&lt;-</span> <span class="fu">ggplot</span>() <span class="sc">+</span></span>
+<span id="cb118-9"><a href="#cb118-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stat_ecdf</span>(<span class="at">data =</span> df_pre_raw, <span class="fu">aes</span>(<span class="at">x =</span> rf_fact_t07, <span class="at">color =</span> <span class="st">"Pre-Omnicare"</span>), <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb118-10"><a href="#cb118-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stat_ecdf</span>(<span class="at">data =</span> df_post_raw, <span class="fu">aes</span>(<span class="at">x =</span> rf_fact_t07, <span class="at">color =</span> <span class="st">"Post-Omnicare"</span>), <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb118-11"><a href="#cb118-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Pre-Omnicare"</span> <span class="ot">=</span> <span class="st">"coral"</span>, <span class="st">"Post-Omnicare"</span> <span class="ot">=</span> <span class="st">"steelblue"</span>)) <span class="sc">+</span></span>
+<span id="cb118-12"><a href="#cb118-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb118-13"><a href="#cb118-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"A. Covariate Distribution: Fact-Intensity (rf_fact_t07)"</span>,</span>
+<span id="cb118-14"><a href="#cb118-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">subtitle =</span> <span class="st">"This drives the COMPOSITION effect"</span>,</span>
+<span id="cb118-15"><a href="#cb118-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Fact-Intensity (rf_fact_t07)"</span>,</span>
+<span id="cb118-16"><a href="#cb118-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Cumulative Probability"</span>,</span>
+<span id="cb118-17"><a href="#cb118-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">color =</span> <span class="st">"Period"</span></span>
+<span id="cb118-18"><a href="#cb118-18" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb118-19"><a href="#cb118-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
+<span id="cb118-20"><a href="#cb118-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>, <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>))</span>
 <span id="cb118-21"><a href="#cb118-21" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-22"><a href="#cb118-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">tryCatch</span>({</span>
-<span id="cb118-23"><a href="#cb118-23" aria-hidden="true" tabindex="-1"></a>      logit_formula <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">"binary_indicator ~"</span>, covariate))</span>
-<span id="cb118-24"><a href="#cb118-24" aria-hidden="true" tabindex="-1"></a>      logit_fit <span class="ot">&lt;-</span> <span class="fu">glm</span>(logit_formula, <span class="at">family =</span> <span class="fu">binomial</span>(<span class="at">link =</span> <span class="st">"logit"</span>), <span class="at">data =</span> temp_data)</span>
-<span id="cb118-25"><a href="#cb118-25" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-26"><a href="#cb118-26" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (<span class="sc">!</span>logit_fit<span class="sc">$</span>converged) <span class="cf">next</span></span>
-<span id="cb118-27"><a href="#cb118-27" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-28"><a href="#cb118-28" aria-hidden="true" tabindex="-1"></a>      distribution_results[[<span class="fu">length</span>(distribution_results) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
-<span id="cb118-29"><a href="#cb118-29" aria-hidden="true" tabindex="-1"></a>        <span class="at">y_threshold =</span> y_threshold,</span>
-<span id="cb118-30"><a href="#cb118-30" aria-hidden="true" tabindex="-1"></a>        <span class="at">fit =</span> logit_fit,</span>
-<span id="cb118-31"><a href="#cb118-31" aria-hidden="true" tabindex="-1"></a>        <span class="at">coefficients =</span> <span class="fu">coef</span>(logit_fit)</span>
-<span id="cb118-32"><a href="#cb118-32" aria-hidden="true" tabindex="-1"></a>      )</span>
-<span id="cb118-33"><a href="#cb118-33" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-34"><a href="#cb118-34" aria-hidden="true" tabindex="-1"></a>      successful_fits <span class="ot">&lt;-</span> <span class="fu">c</span>(successful_fits, y_threshold)</span>
-<span id="cb118-35"><a href="#cb118-35" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-36"><a href="#cb118-36" aria-hidden="true" tabindex="-1"></a>    }, <span class="at">error =</span> <span class="cf">function</span>(e) {</span>
-<span id="cb118-37"><a href="#cb118-37" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Silent error handling</span></span>
-<span id="cb118-38"><a href="#cb118-38" aria-hidden="true" tabindex="-1"></a>    })</span>
-<span id="cb118-39"><a href="#cb118-39" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb118-40"><a href="#cb118-40" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-41"><a href="#cb118-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(<span class="fu">list</span>(</span>
-<span id="cb118-42"><a href="#cb118-42" aria-hidden="true" tabindex="-1"></a>    <span class="at">distribution_results =</span> distribution_results,</span>
-<span id="cb118-43"><a href="#cb118-43" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_grid =</span> successful_fits</span>
-<span id="cb118-44"><a href="#cb118-44" aria-hidden="true" tabindex="-1"></a>  ))</span>
-<span id="cb118-45"><a href="#cb118-45" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb118-46"><a href="#cb118-46" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-47"><a href="#cb118-47" aria-hidden="true" tabindex="-1"></a><span class="co"># Function to predict conditional CDF given covariates and estimated models</span></span>
-<span id="cb118-48"><a href="#cb118-48" aria-hidden="true" tabindex="-1"></a>predict_conditional_cdf <span class="ot">&lt;-</span> <span class="cf">function</span>(distribution_results, covariate_values, y_grid) {</span>
-<span id="cb118-49"><a href="#cb118-49" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-50"><a href="#cb118-50" aria-hidden="true" tabindex="-1"></a>  n_obs <span class="ot">&lt;-</span> <span class="fu">length</span>(covariate_values)</span>
-<span id="cb118-51"><a href="#cb118-51" aria-hidden="true" tabindex="-1"></a>  n_thresholds <span class="ot">&lt;-</span> <span class="fu">length</span>(y_grid)</span>
-<span id="cb118-52"><a href="#cb118-52" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-53"><a href="#cb118-53" aria-hidden="true" tabindex="-1"></a>  cdf_matrix <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, <span class="at">nrow =</span> n_obs, <span class="at">ncol =</span> n_thresholds)</span>
-<span id="cb118-54"><a href="#cb118-54" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-55"><a href="#cb118-55" aria-hidden="true" tabindex="-1"></a>  actual_thresholds <span class="ot">&lt;-</span> <span class="fu">sapply</span>(distribution_results, <span class="cf">function</span>(x) x<span class="sc">$</span>y_threshold)</span>
-<span id="cb118-56"><a href="#cb118-56" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-57"><a href="#cb118-57" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n_thresholds) {</span>
-<span id="cb118-58"><a href="#cb118-58" aria-hidden="true" tabindex="-1"></a>    match_idx <span class="ot">&lt;-</span> <span class="fu">which</span>(<span class="fu">abs</span>(actual_thresholds <span class="sc">-</span> y_grid[i]) <span class="sc">&lt;</span> <span class="fl">1e-10</span>)</span>
-<span id="cb118-59"><a href="#cb118-59" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-60"><a href="#cb118-60" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (<span class="fu">length</span>(match_idx) <span class="sc">==</span> <span class="dv">1</span>) {</span>
-<span id="cb118-61"><a href="#cb118-61" aria-hidden="true" tabindex="-1"></a>      coefs <span class="ot">&lt;-</span> distribution_results[[match_idx]]<span class="sc">$</span>coefficients</span>
-<span id="cb118-62"><a href="#cb118-62" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">length</span>(coefs) <span class="sc">&gt;=</span> <span class="dv">2</span>) {</span>
-<span id="cb118-63"><a href="#cb118-63" aria-hidden="true" tabindex="-1"></a>        linear_pred <span class="ot">&lt;-</span> coefs[<span class="dv">1</span>] <span class="sc">+</span> coefs[<span class="dv">2</span>] <span class="sc">*</span> covariate_values</span>
-<span id="cb118-64"><a href="#cb118-64" aria-hidden="true" tabindex="-1"></a>        cdf_matrix[, i] <span class="ot">&lt;-</span> <span class="fu">plogis</span>(linear_pred)</span>
-<span id="cb118-65"><a href="#cb118-65" aria-hidden="true" tabindex="-1"></a>      }</span>
-<span id="cb118-66"><a href="#cb118-66" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb118-67"><a href="#cb118-67" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb118-68"><a href="#cb118-68" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-69"><a href="#cb118-69" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(cdf_matrix)</span>
-<span id="cb118-70"><a href="#cb118-70" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb118-71"><a href="#cb118-71" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-72"><a href="#cb118-72" aria-hidden="true" tabindex="-1"></a><span class="co"># Function to estimate marginal CDF from conditional CDF</span></span>
-<span id="cb118-73"><a href="#cb118-73" aria-hidden="true" tabindex="-1"></a>estimate_marginal_cdf <span class="ot">&lt;-</span> <span class="cf">function</span>(conditional_cdf_matrix, y_grid) {</span>
-<span id="cb118-74"><a href="#cb118-74" aria-hidden="true" tabindex="-1"></a>  marginal_cdf <span class="ot">&lt;-</span> <span class="fu">colMeans</span>(conditional_cdf_matrix, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-75"><a href="#cb118-75" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-76"><a href="#cb118-76" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(<span class="fu">data.frame</span>(</span>
-<span id="cb118-77"><a href="#cb118-77" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_threshold =</span> y_grid,</span>
-<span id="cb118-78"><a href="#cb118-78" aria-hidden="true" tabindex="-1"></a>    <span class="at">cdf_value =</span> marginal_cdf</span>
-<span id="cb118-79"><a href="#cb118-79" aria-hidden="true" tabindex="-1"></a>  ))</span>
-<span id="cb118-80"><a href="#cb118-80" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb118-81"><a href="#cb118-81" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-82"><a href="#cb118-82" aria-hidden="true" tabindex="-1"></a><span class="co"># Main CFM decomposition function</span></span>
-<span id="cb118-83"><a href="#cb118-83" aria-hidden="true" tabindex="-1"></a>cfm_decomposition <span class="ot">&lt;-</span> <span class="cf">function</span>(data, outcome_var, covariate, group_var, <span class="at">y_grid =</span> <span class="cn">NULL</span>) {</span>
-<span id="cb118-84"><a href="#cb118-84" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-85"><a href="#cb118-85" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Split data by groups</span></span>
-<span id="cb118-86"><a href="#cb118-86" aria-hidden="true" tabindex="-1"></a>  before_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">FALSE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
-<span id="cb118-87"><a href="#cb118-87" aria-hidden="true" tabindex="-1"></a>  after_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">TRUE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
-<span id="cb118-88"><a href="#cb118-88" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-89"><a href="#cb118-89" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Create common y_grid based on combined data</span></span>
-<span id="cb118-90"><a href="#cb118-90" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">is.null</span>(y_grid)) {</span>
-<span id="cb118-91"><a href="#cb118-91" aria-hidden="true" tabindex="-1"></a>    all_outcome_values <span class="ot">&lt;-</span> <span class="fu">c</span>(before_data[[outcome_var]], after_data[[outcome_var]])</span>
-<span id="cb118-92"><a href="#cb118-92" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">quantile</span>(all_outcome_values, <span class="at">probs =</span> <span class="fu">seq</span>(<span class="fl">0.05</span>, <span class="fl">0.95</span>, <span class="at">by =</span> <span class="fl">0.05</span>), <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-93"><a href="#cb118-93" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">unique</span>(y_grid)</span>
-<span id="cb118-94"><a href="#cb118-94" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb118-95"><a href="#cb118-95" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-96"><a href="#cb118-96" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Estimate conditional distributions for each period</span></span>
-<span id="cb118-97"><a href="#cb118-97" aria-hidden="true" tabindex="-1"></a>  cond_dist_before <span class="ot">&lt;-</span> <span class="fu">estimate_conditional_distribution</span>(before_data, outcome_var, covariate, y_grid)</span>
-<span id="cb118-98"><a href="#cb118-98" aria-hidden="true" tabindex="-1"></a>  cond_dist_after <span class="ot">&lt;-</span> <span class="fu">estimate_conditional_distribution</span>(after_data, outcome_var, covariate, y_grid)</span>
-<span id="cb118-99"><a href="#cb118-99" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-100"><a href="#cb118-100" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Use intersection of successful fits</span></span>
-<span id="cb118-101"><a href="#cb118-101" aria-hidden="true" tabindex="-1"></a>  common_y_grid <span class="ot">&lt;-</span> <span class="fu">intersect</span>(cond_dist_before<span class="sc">$</span>y_grid, cond_dist_after<span class="sc">$</span>y_grid)</span>
-<span id="cb118-102"><a href="#cb118-102" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-103"><a href="#cb118-103" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">length</span>(common_y_grid) <span class="sc">&lt;</span> <span class="dv">5</span>) {</span>
-<span id="cb118-104"><a href="#cb118-104" aria-hidden="true" tabindex="-1"></a>    <span class="fu">stop</span>(<span class="fu">paste</span>(<span class="st">"Insufficient common thresholds for decomposition. Only"</span>, <span class="fu">length</span>(common_y_grid), <span class="st">"available."</span>))</span>
-<span id="cb118-105"><a href="#cb118-105" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb118-106"><a href="#cb118-106" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-107"><a href="#cb118-107" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Find indices of common thresholds</span></span>
-<span id="cb118-108"><a href="#cb118-108" aria-hidden="true" tabindex="-1"></a>  before_indices <span class="ot">&lt;-</span> <span class="fu">match</span>(common_y_grid, cond_dist_before<span class="sc">$</span>y_grid)</span>
-<span id="cb118-109"><a href="#cb118-109" aria-hidden="true" tabindex="-1"></a>  after_indices <span class="ot">&lt;-</span> <span class="fu">match</span>(common_y_grid, cond_dist_after<span class="sc">$</span>y_grid)</span>
-<span id="cb118-110"><a href="#cb118-110" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-111"><a href="#cb118-111" aria-hidden="true" tabindex="-1"></a>  valid_indices <span class="ot">&lt;-</span> <span class="sc">!</span><span class="fu">is.na</span>(before_indices) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(after_indices)</span>
-<span id="cb118-112"><a href="#cb118-112" aria-hidden="true" tabindex="-1"></a>  common_y_grid <span class="ot">&lt;-</span> common_y_grid[valid_indices]</span>
-<span id="cb118-113"><a href="#cb118-113" aria-hidden="true" tabindex="-1"></a>  before_indices <span class="ot">&lt;-</span> before_indices[valid_indices]</span>
-<span id="cb118-114"><a href="#cb118-114" aria-hidden="true" tabindex="-1"></a>  after_indices <span class="ot">&lt;-</span> after_indices[valid_indices]</span>
-<span id="cb118-115"><a href="#cb118-115" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-116"><a href="#cb118-116" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extract results for common grid</span></span>
-<span id="cb118-117"><a href="#cb118-117" aria-hidden="true" tabindex="-1"></a>  before_results <span class="ot">&lt;-</span> cond_dist_before<span class="sc">$</span>distribution_results[before_indices]</span>
-<span id="cb118-118"><a href="#cb118-118" aria-hidden="true" tabindex="-1"></a>  after_results <span class="ot">&lt;-</span> cond_dist_after<span class="sc">$</span>distribution_results[after_indices]</span>
-<span id="cb118-119"><a href="#cb118-119" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-120"><a href="#cb118-120" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extract covariate values</span></span>
-<span id="cb118-121"><a href="#cb118-121" aria-hidden="true" tabindex="-1"></a>  X_before <span class="ot">&lt;-</span> before_data[[covariate]]</span>
-<span id="cb118-122"><a href="#cb118-122" aria-hidden="true" tabindex="-1"></a>  X_after <span class="ot">&lt;-</span> after_data[[covariate]]</span>
-<span id="cb118-123"><a href="#cb118-123" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-124"><a href="#cb118-124" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Calculate the four distributions:</span></span>
-<span id="cb118-125"><a href="#cb118-125" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-126"><a href="#cb118-126" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 1. F^{before|before}: Observed before distribution</span></span>
-<span id="cb118-127"><a href="#cb118-127" aria-hidden="true" tabindex="-1"></a>  cdf_before_given_before <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(before_results, X_before, common_y_grid)</span>
-<span id="cb118-128"><a href="#cb118-128" aria-hidden="true" tabindex="-1"></a>  F_before_before <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_before_given_before, common_y_grid)</span>
-<span id="cb118-129"><a href="#cb118-129" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-130"><a href="#cb118-130" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 2. F^{after|after}: Observed after distribution</span></span>
-<span id="cb118-131"><a href="#cb118-131" aria-hidden="true" tabindex="-1"></a>  cdf_after_given_after <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(after_results, X_after, common_y_grid)</span>
-<span id="cb118-132"><a href="#cb118-132" aria-hidden="true" tabindex="-1"></a>  F_after_after <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_after_given_after, common_y_grid)</span>
-<span id="cb118-133"><a href="#cb118-133" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-134"><a href="#cb118-134" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 3. F^{before|after}: Counterfactual - before structure with after composition</span></span>
-<span id="cb118-135"><a href="#cb118-135" aria-hidden="true" tabindex="-1"></a>  cdf_before_given_after <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(before_results, X_after, common_y_grid)</span>
-<span id="cb118-136"><a href="#cb118-136" aria-hidden="true" tabindex="-1"></a>  F_before_after <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_before_given_after, common_y_grid)</span>
-<span id="cb118-137"><a href="#cb118-137" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-138"><a href="#cb118-138" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 4. F^{after|before}: Counterfactual - after structure with before composition</span></span>
-<span id="cb118-139"><a href="#cb118-139" aria-hidden="true" tabindex="-1"></a>  cdf_after_given_before <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(after_results, X_before, common_y_grid)</span>
-<span id="cb118-140"><a href="#cb118-140" aria-hidden="true" tabindex="-1"></a>  F_after_before <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_after_given_before, common_y_grid)</span>
-<span id="cb118-141"><a href="#cb118-141" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-142"><a href="#cb118-142" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Decomposition</span></span>
-<span id="cb118-143"><a href="#cb118-143" aria-hidden="true" tabindex="-1"></a>  total_change <span class="ot">&lt;-</span> F_after_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_before<span class="sc">$</span>cdf_value</span>
-<span id="cb118-144"><a href="#cb118-144" aria-hidden="true" tabindex="-1"></a>  structure_effect <span class="ot">&lt;-</span> F_after_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_after<span class="sc">$</span>cdf_value</span>
-<span id="cb118-145"><a href="#cb118-145" aria-hidden="true" tabindex="-1"></a>  composition_effect <span class="ot">&lt;-</span> F_before_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_before<span class="sc">$</span>cdf_value</span>
-<span id="cb118-146"><a href="#cb118-146" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-147"><a href="#cb118-147" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Alternative decomposition</span></span>
-<span id="cb118-148"><a href="#cb118-148" aria-hidden="true" tabindex="-1"></a>  structure_effect_alt <span class="ot">&lt;-</span> F_after_before<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_before<span class="sc">$</span>cdf_value</span>
-<span id="cb118-149"><a href="#cb118-149" aria-hidden="true" tabindex="-1"></a>  composition_effect_alt <span class="ot">&lt;-</span> F_after_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_after_before<span class="sc">$</span>cdf_value</span>
-<span id="cb118-150"><a href="#cb118-150" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-151"><a href="#cb118-151" aria-hidden="true" tabindex="-1"></a>  decomposition_results <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
-<span id="cb118-152"><a href="#cb118-152" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_threshold =</span> common_y_grid,</span>
-<span id="cb118-153"><a href="#cb118-153" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_before_before =</span> F_before_before<span class="sc">$</span>cdf_value,</span>
-<span id="cb118-154"><a href="#cb118-154" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_after_after =</span> F_after_after<span class="sc">$</span>cdf_value,</span>
-<span id="cb118-155"><a href="#cb118-155" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_before_after =</span> F_before_after<span class="sc">$</span>cdf_value,</span>
-<span id="cb118-156"><a href="#cb118-156" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_after_before =</span> F_after_before<span class="sc">$</span>cdf_value,</span>
-<span id="cb118-157"><a href="#cb118-157" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_change =</span> total_change,</span>
-<span id="cb118-158"><a href="#cb118-158" aria-hidden="true" tabindex="-1"></a>    <span class="at">structure_effect =</span> structure_effect,</span>
-<span id="cb118-159"><a href="#cb118-159" aria-hidden="true" tabindex="-1"></a>    <span class="at">composition_effect =</span> composition_effect,</span>
-<span id="cb118-160"><a href="#cb118-160" aria-hidden="true" tabindex="-1"></a>    <span class="at">structure_effect_alt =</span> structure_effect_alt,</span>
-<span id="cb118-161"><a href="#cb118-161" aria-hidden="true" tabindex="-1"></a>    <span class="at">composition_effect_alt =</span> composition_effect_alt</span>
-<span id="cb118-162"><a href="#cb118-162" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb118-163"><a href="#cb118-163" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-164"><a href="#cb118-164" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(<span class="fu">list</span>(</span>
-<span id="cb118-165"><a href="#cb118-165" aria-hidden="true" tabindex="-1"></a>    <span class="at">decomposition =</span> decomposition_results,</span>
-<span id="cb118-166"><a href="#cb118-166" aria-hidden="true" tabindex="-1"></a>    <span class="at">sample_sizes =</span> <span class="fu">list</span>(<span class="at">before =</span> <span class="fu">nrow</span>(before_data), <span class="at">after =</span> <span class="fu">nrow</span>(after_data)),</span>
-<span id="cb118-167"><a href="#cb118-167" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_grid =</span> common_y_grid</span>
-<span id="cb118-168"><a href="#cb118-168" aria-hidden="true" tabindex="-1"></a>  ))</span>
-<span id="cb118-169"><a href="#cb118-169" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb118-170"><a href="#cb118-170" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-171"><a href="#cb118-171" aria-hidden="true" tabindex="-1"></a><span class="co"># Bootstrap function for confidence intervals</span></span>
-<span id="cb118-172"><a href="#cb118-172" aria-hidden="true" tabindex="-1"></a>bootstrap_cfm_decomposition <span class="ot">&lt;-</span> <span class="cf">function</span>(data, outcome_var, covariate, group_var,</span>
-<span id="cb118-173"><a href="#cb118-173" aria-hidden="true" tabindex="-1"></a>                                         <span class="at">y_grid =</span> <span class="cn">NULL</span>, <span class="at">n_bootstrap =</span> <span class="dv">200</span>) {</span>
-<span id="cb118-174"><a href="#cb118-174" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-175"><a href="#cb118-175" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Original decomposition</span></span>
-<span id="cb118-176"><a href="#cb118-176" aria-hidden="true" tabindex="-1"></a>  original_results <span class="ot">&lt;-</span> <span class="fu">cfm_decomposition</span>(data, outcome_var, covariate, group_var, y_grid)</span>
-<span id="cb118-177"><a href="#cb118-177" aria-hidden="true" tabindex="-1"></a>  y_grid_common <span class="ot">&lt;-</span> original_results<span class="sc">$</span>y_grid</span>
-<span id="cb118-178"><a href="#cb118-178" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-179"><a href="#cb118-179" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Bootstrap</span></span>
-<span id="cb118-180"><a href="#cb118-180" aria-hidden="true" tabindex="-1"></a>  bootstrap_results <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb118-181"><a href="#cb118-181" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-182"><a href="#cb118-182" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (b <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n_bootstrap) {</span>
-<span id="cb118-183"><a href="#cb118-183" aria-hidden="true" tabindex="-1"></a>    <span class="fu">tryCatch</span>({</span>
-<span id="cb118-184"><a href="#cb118-184" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Sample with replacement within each group</span></span>
-<span id="cb118-185"><a href="#cb118-185" aria-hidden="true" tabindex="-1"></a>      before_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">FALSE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
-<span id="cb118-186"><a href="#cb118-186" aria-hidden="true" tabindex="-1"></a>      after_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">TRUE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
-<span id="cb118-187"><a href="#cb118-187" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-188"><a href="#cb118-188" aria-hidden="true" tabindex="-1"></a>      before_boot <span class="ot">&lt;-</span> before_data[<span class="fu">sample</span>(<span class="fu">nrow</span>(before_data), <span class="at">replace =</span> <span class="cn">TRUE</span>), ]</span>
-<span id="cb118-189"><a href="#cb118-189" aria-hidden="true" tabindex="-1"></a>      after_boot <span class="ot">&lt;-</span> after_data[<span class="fu">sample</span>(<span class="fu">nrow</span>(after_data), <span class="at">replace =</span> <span class="cn">TRUE</span>), ]</span>
-<span id="cb118-190"><a href="#cb118-190" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-191"><a href="#cb118-191" aria-hidden="true" tabindex="-1"></a>      boot_data <span class="ot">&lt;-</span> <span class="fu">rbind</span>(before_boot, after_boot)</span>
-<span id="cb118-192"><a href="#cb118-192" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-193"><a href="#cb118-193" aria-hidden="true" tabindex="-1"></a>      boot_results <span class="ot">&lt;-</span> <span class="fu">cfm_decomposition</span>(boot_data, outcome_var, covariate, group_var, y_grid_common)</span>
-<span id="cb118-194"><a href="#cb118-194" aria-hidden="true" tabindex="-1"></a>      bootstrap_results[[b]] <span class="ot">&lt;-</span> boot_results<span class="sc">$</span>decomposition</span>
-<span id="cb118-195"><a href="#cb118-195" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-196"><a href="#cb118-196" aria-hidden="true" tabindex="-1"></a>    }, <span class="at">error =</span> <span class="cf">function</span>(e) {</span>
-<span id="cb118-197"><a href="#cb118-197" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Silent error handling</span></span>
-<span id="cb118-198"><a href="#cb118-198" aria-hidden="true" tabindex="-1"></a>    })</span>
-<span id="cb118-199"><a href="#cb118-199" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb118-200"><a href="#cb118-200" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-201"><a href="#cb118-201" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Remove failed bootstrap iterations</span></span>
-<span id="cb118-202"><a href="#cb118-202" aria-hidden="true" tabindex="-1"></a>  bootstrap_results <span class="ot">&lt;-</span> bootstrap_results[<span class="sc">!</span><span class="fu">sapply</span>(bootstrap_results, is.null)]</span>
-<span id="cb118-203"><a href="#cb118-203" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-204"><a href="#cb118-204" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">length</span>(bootstrap_results) <span class="sc">&gt;</span> <span class="dv">10</span>) {</span>
-<span id="cb118-205"><a href="#cb118-205" aria-hidden="true" tabindex="-1"></a>    n_successful <span class="ot">&lt;-</span> <span class="fu">length</span>(bootstrap_results)</span>
-<span id="cb118-206"><a href="#cb118-206" aria-hidden="true" tabindex="-1"></a>    n_thresholds <span class="ot">&lt;-</span> <span class="fu">length</span>(y_grid_common)</span>
-<span id="cb118-207"><a href="#cb118-207" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-208"><a href="#cb118-208" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extract bootstrap values</span></span>
-<span id="cb118-209"><a href="#cb118-209" aria-hidden="true" tabindex="-1"></a>    total_change_boot <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, n_successful, n_thresholds)</span>
-<span id="cb118-210"><a href="#cb118-210" aria-hidden="true" tabindex="-1"></a>    structure_boot <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, n_successful, n_thresholds)</span>
-<span id="cb118-211"><a href="#cb118-211" aria-hidden="true" tabindex="-1"></a>    composition_boot <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, n_successful, n_thresholds)</span>
-<span id="cb118-212"><a href="#cb118-212" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-213"><a href="#cb118-213" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n_successful) {</span>
-<span id="cb118-214"><a href="#cb118-214" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">nrow</span>(bootstrap_results[[i]]) <span class="sc">==</span> n_thresholds) {</span>
-<span id="cb118-215"><a href="#cb118-215" aria-hidden="true" tabindex="-1"></a>        total_change_boot[i, ] <span class="ot">&lt;-</span> bootstrap_results[[i]]<span class="sc">$</span>total_change</span>
-<span id="cb118-216"><a href="#cb118-216" aria-hidden="true" tabindex="-1"></a>        structure_boot[i, ] <span class="ot">&lt;-</span> bootstrap_results[[i]]<span class="sc">$</span>structure_effect</span>
-<span id="cb118-217"><a href="#cb118-217" aria-hidden="true" tabindex="-1"></a>        composition_boot[i, ] <span class="ot">&lt;-</span> bootstrap_results[[i]]<span class="sc">$</span>composition_effect</span>
-<span id="cb118-218"><a href="#cb118-218" aria-hidden="true" tabindex="-1"></a>      }</span>
-<span id="cb118-219"><a href="#cb118-219" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb118-220"><a href="#cb118-220" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-221"><a href="#cb118-221" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Calculate confidence intervals</span></span>
-<span id="cb118-222"><a href="#cb118-222" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>total_ci_lower <span class="ot">&lt;-</span> <span class="fu">apply</span>(total_change_boot, <span class="dv">2</span>, quantile, <span class="fl">0.025</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-223"><a href="#cb118-223" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>total_ci_upper <span class="ot">&lt;-</span> <span class="fu">apply</span>(total_change_boot, <span class="dv">2</span>, quantile, <span class="fl">0.975</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-224"><a href="#cb118-224" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>structure_ci_lower <span class="ot">&lt;-</span> <span class="fu">apply</span>(structure_boot, <span class="dv">2</span>, quantile, <span class="fl">0.025</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-225"><a href="#cb118-225" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>structure_ci_upper <span class="ot">&lt;-</span> <span class="fu">apply</span>(structure_boot, <span class="dv">2</span>, quantile, <span class="fl">0.975</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-226"><a href="#cb118-226" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>composition_ci_lower <span class="ot">&lt;-</span> <span class="fu">apply</span>(composition_boot, <span class="dv">2</span>, quantile, <span class="fl">0.025</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-227"><a href="#cb118-227" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>composition_ci_upper <span class="ot">&lt;-</span> <span class="fu">apply</span>(composition_boot, <span class="dv">2</span>, quantile, <span class="fl">0.975</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb118-228"><a href="#cb118-228" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb118-229"><a href="#cb118-229" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb118-230"><a href="#cb118-230" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(original_results)</span>
-<span id="cb118-231"><a href="#cb118-231" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb118-22"><a href="#cb118-22" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel B: First-day return distribution (the outcome)</span></span>
+<span id="cb118-23"><a href="#cb118-23" aria-hidden="true" tabindex="-1"></a>p_return_cdf <span class="ot">&lt;-</span> <span class="fu">ggplot</span>() <span class="sc">+</span></span>
+<span id="cb118-24"><a href="#cb118-24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stat_ecdf</span>(<span class="at">data =</span> df_pre_raw, <span class="fu">aes</span>(<span class="at">x =</span> first_day_return, <span class="at">color =</span> <span class="st">"Pre-Omnicare"</span>), <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb118-25"><a href="#cb118-25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stat_ecdf</span>(<span class="at">data =</span> df_post_raw, <span class="fu">aes</span>(<span class="at">x =</span> first_day_return, <span class="at">color =</span> <span class="st">"Post-Omnicare"</span>), <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb118-26"><a href="#cb118-26" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Pre-Omnicare"</span> <span class="ot">=</span> <span class="st">"coral"</span>, <span class="st">"Post-Omnicare"</span> <span class="ot">=</span> <span class="st">"steelblue"</span>)) <span class="sc">+</span></span>
+<span id="cb118-27"><a href="#cb118-27" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_cartesian</span>(<span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">0.5</span>, <span class="fl">1.5</span>)) <span class="sc">+</span>  <span class="co"># Focus on main mass</span></span>
+<span id="cb118-28"><a href="#cb118-28" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb118-29"><a href="#cb118-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"B. Outcome Distribution: First-Day Returns"</span>,</span>
+<span id="cb118-30"><a href="#cb118-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">subtitle =</span> <span class="st">"Total change = Structure + Composition"</span>,</span>
+<span id="cb118-31"><a href="#cb118-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"First-Day Return"</span>,</span>
+<span id="cb118-32"><a href="#cb118-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Cumulative Probability"</span>,</span>
+<span id="cb118-33"><a href="#cb118-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">color =</span> <span class="st">"Period"</span></span>
+<span id="cb118-34"><a href="#cb118-34" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb118-35"><a href="#cb118-35" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
+<span id="cb118-36"><a href="#cb118-36" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"bottom"</span>, <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>))</span>
+<span id="cb118-37"><a href="#cb118-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb118-38"><a href="#cb118-38" aria-hidden="true" tabindex="-1"></a><span class="co"># Combine</span></span>
+<span id="cb118-39"><a href="#cb118-39" aria-hidden="true" tabindex="-1"></a>p_rf_cdf <span class="sc">/</span> p_return_cdf</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="02_measure_validation_files/figure-html/raw-distribution-shifts-1.png" class="img-fluid figure-img" width="768"></p>
+<figcaption>Raw Distributional Shifts: Pre vs.&nbsp;Post Omnicare</figcaption>
+</figure>
+</div>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb119"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb119-1"><a href="#cb119-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Print summary statistics</span></span>
+<span id="cb119-2"><a href="#cb119-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"=== DISTRIBUTIONAL SHIFT SUMMARY ===</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>=== DISTRIBUTIONAL SHIFT SUMMARY ===</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb121"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb121-1"><a href="#cb121-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Fact-Intensity (rf_fact_t07):</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>Fact-Intensity (rf_fact_t07):</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb123"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb123-1"><a href="#cb123-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Pre-Omnicare mean:  %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(df_pre_raw<span class="sc">$</span>rf_fact_t07, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Pre-Omnicare mean:  0.5274</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb125"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb125-1"><a href="#cb125-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Post-Omnicare mean: %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(df_post_raw<span class="sc">$</span>rf_fact_t07, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Post-Omnicare mean: 0.4980</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb127"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb127-1"><a href="#cb127-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Difference: %.4f (%s)</span><span class="sc">\n\n</span><span class="st">"</span>,</span>
+<span id="cb127-2"><a href="#cb127-2" aria-hidden="true" tabindex="-1"></a>            <span class="fu">mean</span>(df_post_raw<span class="sc">$</span>rf_fact_t07, <span class="at">na.rm =</span> <span class="cn">TRUE</span>) <span class="sc">-</span> <span class="fu">mean</span>(df_pre_raw<span class="sc">$</span>rf_fact_t07, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb127-3"><a href="#cb127-3" aria-hidden="true" tabindex="-1"></a>            <span class="fu">ifelse</span>(<span class="fu">mean</span>(df_post_raw<span class="sc">$</span>rf_fact_t07, <span class="at">na.rm =</span> <span class="cn">TRUE</span>) <span class="sc">&gt;</span> <span class="fu">mean</span>(df_pre_raw<span class="sc">$</span>rf_fact_t07, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb127-4"><a href="#cb127-4" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"MORE facts post-Omnicare"</span>, <span class="st">"FEWER facts post-Omnicare"</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Difference: -0.0294 (FEWER facts post-Omnicare)</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb129"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb129-1"><a href="#cb129-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"First-Day Returns:</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>First-Day Returns:</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb131"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb131-1"><a href="#cb131-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Pre-Omnicare mean:  %.4f (%.1f%%)</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(df_pre_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb131-2"><a href="#cb131-2" aria-hidden="true" tabindex="-1"></a>            <span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(df_pre_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Pre-Omnicare mean:  0.1334 (13.3%)</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb133"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb133-1"><a href="#cb133-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Post-Omnicare mean: %.4f (%.1f%%)</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(df_post_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb133-2"><a href="#cb133-2" aria-hidden="true" tabindex="-1"></a>            <span class="dv">100</span> <span class="sc">*</span> <span class="fu">mean</span>(df_post_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Post-Omnicare mean: 0.2332 (23.3%)</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb135"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb135-1"><a href="#cb135-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Difference: %.4f (%s)</span><span class="sc">\n</span><span class="st">"</span>,</span>
+<span id="cb135-2"><a href="#cb135-2" aria-hidden="true" tabindex="-1"></a>            <span class="fu">mean</span>(df_post_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>) <span class="sc">-</span> <span class="fu">mean</span>(df_pre_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb135-3"><a href="#cb135-3" aria-hidden="true" tabindex="-1"></a>            <span class="fu">ifelse</span>(<span class="fu">mean</span>(df_post_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>) <span class="sc">&lt;</span> <span class="fu">mean</span>(df_pre_raw<span class="sc">$</span>first_day_return, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb135-4"><a href="#cb135-4" aria-hidden="true" tabindex="-1"></a>                   <span class="st">"LESS underpricing post-Omnicare"</span>, <span class="st">"MORE underpricing post-Omnicare"</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Difference: 0.0997 (MORE underpricing post-Omnicare)</code></pre>
+</div>
+</div>
+<div class="cell">
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb137"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb137-1"><a href="#cb137-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Function to estimate conditional distribution using logit regression</span></span>
+<span id="cb137-2"><a href="#cb137-2" aria-hidden="true" tabindex="-1"></a>estimate_conditional_distribution <span class="ot">&lt;-</span> <span class="cf">function</span>(data, outcome_var, covariate, <span class="at">y_grid =</span> <span class="cn">NULL</span>) {</span>
+<span id="cb137-3"><a href="#cb137-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-4"><a href="#cb137-4" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">is.null</span>(y_grid)) {</span>
+<span id="cb137-5"><a href="#cb137-5" aria-hidden="true" tabindex="-1"></a>    y_values <span class="ot">&lt;-</span> data[[outcome_var]]</span>
+<span id="cb137-6"><a href="#cb137-6" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">quantile</span>(y_values, <span class="at">probs =</span> <span class="fu">seq</span>(<span class="fl">0.05</span>, <span class="fl">0.95</span>, <span class="at">by =</span> <span class="fl">0.05</span>), <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-7"><a href="#cb137-7" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">unique</span>(y_grid)</span>
+<span id="cb137-8"><a href="#cb137-8" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb137-9"><a href="#cb137-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-10"><a href="#cb137-10" aria-hidden="true" tabindex="-1"></a>  distribution_results <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb137-11"><a href="#cb137-11" aria-hidden="true" tabindex="-1"></a>  successful_fits <span class="ot">&lt;-</span> <span class="fu">c</span>()</span>
+<span id="cb137-12"><a href="#cb137-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-13"><a href="#cb137-13" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (j <span class="cf">in</span> <span class="fu">seq_along</span>(y_grid)) {</span>
+<span id="cb137-14"><a href="#cb137-14" aria-hidden="true" tabindex="-1"></a>    y_threshold <span class="ot">&lt;-</span> y_grid[j]</span>
+<span id="cb137-15"><a href="#cb137-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-16"><a href="#cb137-16" aria-hidden="true" tabindex="-1"></a>    temp_data <span class="ot">&lt;-</span> data</span>
+<span id="cb137-17"><a href="#cb137-17" aria-hidden="true" tabindex="-1"></a>    temp_data<span class="sc">$</span>binary_indicator <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(data[[outcome_var]] <span class="sc">&lt;=</span> y_threshold)</span>
+<span id="cb137-18"><a href="#cb137-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-19"><a href="#cb137-19" aria-hidden="true" tabindex="-1"></a>    prop_below <span class="ot">&lt;-</span> <span class="fu">mean</span>(temp_data<span class="sc">$</span>binary_indicator)</span>
+<span id="cb137-20"><a href="#cb137-20" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (prop_below <span class="sc">==</span> <span class="dv">0</span> <span class="sc">||</span> prop_below <span class="sc">==</span> <span class="dv">1</span>) <span class="cf">next</span></span>
+<span id="cb137-21"><a href="#cb137-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-22"><a href="#cb137-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">tryCatch</span>({</span>
+<span id="cb137-23"><a href="#cb137-23" aria-hidden="true" tabindex="-1"></a>      logit_formula <span class="ot">&lt;-</span> <span class="fu">as.formula</span>(<span class="fu">paste</span>(<span class="st">"binary_indicator ~"</span>, covariate))</span>
+<span id="cb137-24"><a href="#cb137-24" aria-hidden="true" tabindex="-1"></a>      logit_fit <span class="ot">&lt;-</span> <span class="fu">glm</span>(logit_formula, <span class="at">family =</span> <span class="fu">binomial</span>(<span class="at">link =</span> <span class="st">"logit"</span>), <span class="at">data =</span> temp_data)</span>
+<span id="cb137-25"><a href="#cb137-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-26"><a href="#cb137-26" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (<span class="sc">!</span>logit_fit<span class="sc">$</span>converged) <span class="cf">next</span></span>
+<span id="cb137-27"><a href="#cb137-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-28"><a href="#cb137-28" aria-hidden="true" tabindex="-1"></a>      distribution_results[[<span class="fu">length</span>(distribution_results) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb137-29"><a href="#cb137-29" aria-hidden="true" tabindex="-1"></a>        <span class="at">y_threshold =</span> y_threshold,</span>
+<span id="cb137-30"><a href="#cb137-30" aria-hidden="true" tabindex="-1"></a>        <span class="at">fit =</span> logit_fit,</span>
+<span id="cb137-31"><a href="#cb137-31" aria-hidden="true" tabindex="-1"></a>        <span class="at">coefficients =</span> <span class="fu">coef</span>(logit_fit)</span>
+<span id="cb137-32"><a href="#cb137-32" aria-hidden="true" tabindex="-1"></a>      )</span>
+<span id="cb137-33"><a href="#cb137-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-34"><a href="#cb137-34" aria-hidden="true" tabindex="-1"></a>      successful_fits <span class="ot">&lt;-</span> <span class="fu">c</span>(successful_fits, y_threshold)</span>
+<span id="cb137-35"><a href="#cb137-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-36"><a href="#cb137-36" aria-hidden="true" tabindex="-1"></a>    }, <span class="at">error =</span> <span class="cf">function</span>(e) {</span>
+<span id="cb137-37"><a href="#cb137-37" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Silent error handling</span></span>
+<span id="cb137-38"><a href="#cb137-38" aria-hidden="true" tabindex="-1"></a>    })</span>
+<span id="cb137-39"><a href="#cb137-39" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb137-40"><a href="#cb137-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-41"><a href="#cb137-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(<span class="fu">list</span>(</span>
+<span id="cb137-42"><a href="#cb137-42" aria-hidden="true" tabindex="-1"></a>    <span class="at">distribution_results =</span> distribution_results,</span>
+<span id="cb137-43"><a href="#cb137-43" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_grid =</span> successful_fits</span>
+<span id="cb137-44"><a href="#cb137-44" aria-hidden="true" tabindex="-1"></a>  ))</span>
+<span id="cb137-45"><a href="#cb137-45" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb137-46"><a href="#cb137-46" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-47"><a href="#cb137-47" aria-hidden="true" tabindex="-1"></a><span class="co"># Function to predict conditional CDF given covariates and estimated models</span></span>
+<span id="cb137-48"><a href="#cb137-48" aria-hidden="true" tabindex="-1"></a>predict_conditional_cdf <span class="ot">&lt;-</span> <span class="cf">function</span>(distribution_results, covariate_values, y_grid) {</span>
+<span id="cb137-49"><a href="#cb137-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-50"><a href="#cb137-50" aria-hidden="true" tabindex="-1"></a>  n_obs <span class="ot">&lt;-</span> <span class="fu">length</span>(covariate_values)</span>
+<span id="cb137-51"><a href="#cb137-51" aria-hidden="true" tabindex="-1"></a>  n_thresholds <span class="ot">&lt;-</span> <span class="fu">length</span>(y_grid)</span>
+<span id="cb137-52"><a href="#cb137-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-53"><a href="#cb137-53" aria-hidden="true" tabindex="-1"></a>  cdf_matrix <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, <span class="at">nrow =</span> n_obs, <span class="at">ncol =</span> n_thresholds)</span>
+<span id="cb137-54"><a href="#cb137-54" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-55"><a href="#cb137-55" aria-hidden="true" tabindex="-1"></a>  actual_thresholds <span class="ot">&lt;-</span> <span class="fu">sapply</span>(distribution_results, <span class="cf">function</span>(x) x<span class="sc">$</span>y_threshold)</span>
+<span id="cb137-56"><a href="#cb137-56" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-57"><a href="#cb137-57" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n_thresholds) {</span>
+<span id="cb137-58"><a href="#cb137-58" aria-hidden="true" tabindex="-1"></a>    match_idx <span class="ot">&lt;-</span> <span class="fu">which</span>(<span class="fu">abs</span>(actual_thresholds <span class="sc">-</span> y_grid[i]) <span class="sc">&lt;</span> <span class="fl">1e-10</span>)</span>
+<span id="cb137-59"><a href="#cb137-59" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-60"><a href="#cb137-60" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (<span class="fu">length</span>(match_idx) <span class="sc">==</span> <span class="dv">1</span>) {</span>
+<span id="cb137-61"><a href="#cb137-61" aria-hidden="true" tabindex="-1"></a>      coefs <span class="ot">&lt;-</span> distribution_results[[match_idx]]<span class="sc">$</span>coefficients</span>
+<span id="cb137-62"><a href="#cb137-62" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">length</span>(coefs) <span class="sc">&gt;=</span> <span class="dv">2</span>) {</span>
+<span id="cb137-63"><a href="#cb137-63" aria-hidden="true" tabindex="-1"></a>        linear_pred <span class="ot">&lt;-</span> coefs[<span class="dv">1</span>] <span class="sc">+</span> coefs[<span class="dv">2</span>] <span class="sc">*</span> covariate_values</span>
+<span id="cb137-64"><a href="#cb137-64" aria-hidden="true" tabindex="-1"></a>        cdf_matrix[, i] <span class="ot">&lt;-</span> <span class="fu">plogis</span>(linear_pred)</span>
+<span id="cb137-65"><a href="#cb137-65" aria-hidden="true" tabindex="-1"></a>      }</span>
+<span id="cb137-66"><a href="#cb137-66" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb137-67"><a href="#cb137-67" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb137-68"><a href="#cb137-68" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-69"><a href="#cb137-69" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(cdf_matrix)</span>
+<span id="cb137-70"><a href="#cb137-70" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb137-71"><a href="#cb137-71" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-72"><a href="#cb137-72" aria-hidden="true" tabindex="-1"></a><span class="co"># Function to estimate marginal CDF from conditional CDF</span></span>
+<span id="cb137-73"><a href="#cb137-73" aria-hidden="true" tabindex="-1"></a>estimate_marginal_cdf <span class="ot">&lt;-</span> <span class="cf">function</span>(conditional_cdf_matrix, y_grid) {</span>
+<span id="cb137-74"><a href="#cb137-74" aria-hidden="true" tabindex="-1"></a>  marginal_cdf <span class="ot">&lt;-</span> <span class="fu">colMeans</span>(conditional_cdf_matrix, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-75"><a href="#cb137-75" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-76"><a href="#cb137-76" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(<span class="fu">data.frame</span>(</span>
+<span id="cb137-77"><a href="#cb137-77" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_threshold =</span> y_grid,</span>
+<span id="cb137-78"><a href="#cb137-78" aria-hidden="true" tabindex="-1"></a>    <span class="at">cdf_value =</span> marginal_cdf</span>
+<span id="cb137-79"><a href="#cb137-79" aria-hidden="true" tabindex="-1"></a>  ))</span>
+<span id="cb137-80"><a href="#cb137-80" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb137-81"><a href="#cb137-81" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-82"><a href="#cb137-82" aria-hidden="true" tabindex="-1"></a><span class="co"># Main CFM decomposition function</span></span>
+<span id="cb137-83"><a href="#cb137-83" aria-hidden="true" tabindex="-1"></a>cfm_decomposition <span class="ot">&lt;-</span> <span class="cf">function</span>(data, outcome_var, covariate, group_var, <span class="at">y_grid =</span> <span class="cn">NULL</span>) {</span>
+<span id="cb137-84"><a href="#cb137-84" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-85"><a href="#cb137-85" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Split data by groups</span></span>
+<span id="cb137-86"><a href="#cb137-86" aria-hidden="true" tabindex="-1"></a>  before_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">FALSE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
+<span id="cb137-87"><a href="#cb137-87" aria-hidden="true" tabindex="-1"></a>  after_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">TRUE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
+<span id="cb137-88"><a href="#cb137-88" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-89"><a href="#cb137-89" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Create common y_grid based on combined data</span></span>
+<span id="cb137-90"><a href="#cb137-90" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">is.null</span>(y_grid)) {</span>
+<span id="cb137-91"><a href="#cb137-91" aria-hidden="true" tabindex="-1"></a>    all_outcome_values <span class="ot">&lt;-</span> <span class="fu">c</span>(before_data[[outcome_var]], after_data[[outcome_var]])</span>
+<span id="cb137-92"><a href="#cb137-92" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">quantile</span>(all_outcome_values, <span class="at">probs =</span> <span class="fu">seq</span>(<span class="fl">0.05</span>, <span class="fl">0.95</span>, <span class="at">by =</span> <span class="fl">0.05</span>), <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-93"><a href="#cb137-93" aria-hidden="true" tabindex="-1"></a>    y_grid <span class="ot">&lt;-</span> <span class="fu">unique</span>(y_grid)</span>
+<span id="cb137-94"><a href="#cb137-94" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb137-95"><a href="#cb137-95" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-96"><a href="#cb137-96" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Estimate conditional distributions for each period</span></span>
+<span id="cb137-97"><a href="#cb137-97" aria-hidden="true" tabindex="-1"></a>  cond_dist_before <span class="ot">&lt;-</span> <span class="fu">estimate_conditional_distribution</span>(before_data, outcome_var, covariate, y_grid)</span>
+<span id="cb137-98"><a href="#cb137-98" aria-hidden="true" tabindex="-1"></a>  cond_dist_after <span class="ot">&lt;-</span> <span class="fu">estimate_conditional_distribution</span>(after_data, outcome_var, covariate, y_grid)</span>
+<span id="cb137-99"><a href="#cb137-99" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-100"><a href="#cb137-100" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Use intersection of successful fits</span></span>
+<span id="cb137-101"><a href="#cb137-101" aria-hidden="true" tabindex="-1"></a>  common_y_grid <span class="ot">&lt;-</span> <span class="fu">intersect</span>(cond_dist_before<span class="sc">$</span>y_grid, cond_dist_after<span class="sc">$</span>y_grid)</span>
+<span id="cb137-102"><a href="#cb137-102" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-103"><a href="#cb137-103" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">length</span>(common_y_grid) <span class="sc">&lt;</span> <span class="dv">5</span>) {</span>
+<span id="cb137-104"><a href="#cb137-104" aria-hidden="true" tabindex="-1"></a>    <span class="fu">stop</span>(<span class="fu">paste</span>(<span class="st">"Insufficient common thresholds for decomposition. Only"</span>, <span class="fu">length</span>(common_y_grid), <span class="st">"available."</span>))</span>
+<span id="cb137-105"><a href="#cb137-105" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb137-106"><a href="#cb137-106" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-107"><a href="#cb137-107" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Find indices of common thresholds</span></span>
+<span id="cb137-108"><a href="#cb137-108" aria-hidden="true" tabindex="-1"></a>  before_indices <span class="ot">&lt;-</span> <span class="fu">match</span>(common_y_grid, cond_dist_before<span class="sc">$</span>y_grid)</span>
+<span id="cb137-109"><a href="#cb137-109" aria-hidden="true" tabindex="-1"></a>  after_indices <span class="ot">&lt;-</span> <span class="fu">match</span>(common_y_grid, cond_dist_after<span class="sc">$</span>y_grid)</span>
+<span id="cb137-110"><a href="#cb137-110" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-111"><a href="#cb137-111" aria-hidden="true" tabindex="-1"></a>  valid_indices <span class="ot">&lt;-</span> <span class="sc">!</span><span class="fu">is.na</span>(before_indices) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(after_indices)</span>
+<span id="cb137-112"><a href="#cb137-112" aria-hidden="true" tabindex="-1"></a>  common_y_grid <span class="ot">&lt;-</span> common_y_grid[valid_indices]</span>
+<span id="cb137-113"><a href="#cb137-113" aria-hidden="true" tabindex="-1"></a>  before_indices <span class="ot">&lt;-</span> before_indices[valid_indices]</span>
+<span id="cb137-114"><a href="#cb137-114" aria-hidden="true" tabindex="-1"></a>  after_indices <span class="ot">&lt;-</span> after_indices[valid_indices]</span>
+<span id="cb137-115"><a href="#cb137-115" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-116"><a href="#cb137-116" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extract results for common grid</span></span>
+<span id="cb137-117"><a href="#cb137-117" aria-hidden="true" tabindex="-1"></a>  before_results <span class="ot">&lt;-</span> cond_dist_before<span class="sc">$</span>distribution_results[before_indices]</span>
+<span id="cb137-118"><a href="#cb137-118" aria-hidden="true" tabindex="-1"></a>  after_results <span class="ot">&lt;-</span> cond_dist_after<span class="sc">$</span>distribution_results[after_indices]</span>
+<span id="cb137-119"><a href="#cb137-119" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-120"><a href="#cb137-120" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extract covariate values</span></span>
+<span id="cb137-121"><a href="#cb137-121" aria-hidden="true" tabindex="-1"></a>  X_before <span class="ot">&lt;-</span> before_data[[covariate]]</span>
+<span id="cb137-122"><a href="#cb137-122" aria-hidden="true" tabindex="-1"></a>  X_after <span class="ot">&lt;-</span> after_data[[covariate]]</span>
+<span id="cb137-123"><a href="#cb137-123" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-124"><a href="#cb137-124" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Calculate the four distributions:</span></span>
+<span id="cb137-125"><a href="#cb137-125" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-126"><a href="#cb137-126" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 1. F^{before|before}: Observed before distribution</span></span>
+<span id="cb137-127"><a href="#cb137-127" aria-hidden="true" tabindex="-1"></a>  cdf_before_given_before <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(before_results, X_before, common_y_grid)</span>
+<span id="cb137-128"><a href="#cb137-128" aria-hidden="true" tabindex="-1"></a>  F_before_before <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_before_given_before, common_y_grid)</span>
+<span id="cb137-129"><a href="#cb137-129" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-130"><a href="#cb137-130" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 2. F^{after|after}: Observed after distribution</span></span>
+<span id="cb137-131"><a href="#cb137-131" aria-hidden="true" tabindex="-1"></a>  cdf_after_given_after <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(after_results, X_after, common_y_grid)</span>
+<span id="cb137-132"><a href="#cb137-132" aria-hidden="true" tabindex="-1"></a>  F_after_after <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_after_given_after, common_y_grid)</span>
+<span id="cb137-133"><a href="#cb137-133" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-134"><a href="#cb137-134" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 3. F^{before|after}: Counterfactual - before structure with after composition</span></span>
+<span id="cb137-135"><a href="#cb137-135" aria-hidden="true" tabindex="-1"></a>  cdf_before_given_after <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(before_results, X_after, common_y_grid)</span>
+<span id="cb137-136"><a href="#cb137-136" aria-hidden="true" tabindex="-1"></a>  F_before_after <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_before_given_after, common_y_grid)</span>
+<span id="cb137-137"><a href="#cb137-137" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-138"><a href="#cb137-138" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 4. F^{after|before}: Counterfactual - after structure with before composition</span></span>
+<span id="cb137-139"><a href="#cb137-139" aria-hidden="true" tabindex="-1"></a>  cdf_after_given_before <span class="ot">&lt;-</span> <span class="fu">predict_conditional_cdf</span>(after_results, X_before, common_y_grid)</span>
+<span id="cb137-140"><a href="#cb137-140" aria-hidden="true" tabindex="-1"></a>  F_after_before <span class="ot">&lt;-</span> <span class="fu">estimate_marginal_cdf</span>(cdf_after_given_before, common_y_grid)</span>
+<span id="cb137-141"><a href="#cb137-141" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-142"><a href="#cb137-142" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Decomposition</span></span>
+<span id="cb137-143"><a href="#cb137-143" aria-hidden="true" tabindex="-1"></a>  total_change <span class="ot">&lt;-</span> F_after_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_before<span class="sc">$</span>cdf_value</span>
+<span id="cb137-144"><a href="#cb137-144" aria-hidden="true" tabindex="-1"></a>  structure_effect <span class="ot">&lt;-</span> F_after_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_after<span class="sc">$</span>cdf_value</span>
+<span id="cb137-145"><a href="#cb137-145" aria-hidden="true" tabindex="-1"></a>  composition_effect <span class="ot">&lt;-</span> F_before_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_before<span class="sc">$</span>cdf_value</span>
+<span id="cb137-146"><a href="#cb137-146" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-147"><a href="#cb137-147" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Alternative decomposition</span></span>
+<span id="cb137-148"><a href="#cb137-148" aria-hidden="true" tabindex="-1"></a>  structure_effect_alt <span class="ot">&lt;-</span> F_after_before<span class="sc">$</span>cdf_value <span class="sc">-</span> F_before_before<span class="sc">$</span>cdf_value</span>
+<span id="cb137-149"><a href="#cb137-149" aria-hidden="true" tabindex="-1"></a>  composition_effect_alt <span class="ot">&lt;-</span> F_after_after<span class="sc">$</span>cdf_value <span class="sc">-</span> F_after_before<span class="sc">$</span>cdf_value</span>
+<span id="cb137-150"><a href="#cb137-150" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-151"><a href="#cb137-151" aria-hidden="true" tabindex="-1"></a>  decomposition_results <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb137-152"><a href="#cb137-152" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_threshold =</span> common_y_grid,</span>
+<span id="cb137-153"><a href="#cb137-153" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_before_before =</span> F_before_before<span class="sc">$</span>cdf_value,</span>
+<span id="cb137-154"><a href="#cb137-154" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_after_after =</span> F_after_after<span class="sc">$</span>cdf_value,</span>
+<span id="cb137-155"><a href="#cb137-155" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_before_after =</span> F_before_after<span class="sc">$</span>cdf_value,</span>
+<span id="cb137-156"><a href="#cb137-156" aria-hidden="true" tabindex="-1"></a>    <span class="at">F_after_before =</span> F_after_before<span class="sc">$</span>cdf_value,</span>
+<span id="cb137-157"><a href="#cb137-157" aria-hidden="true" tabindex="-1"></a>    <span class="at">total_change =</span> total_change,</span>
+<span id="cb137-158"><a href="#cb137-158" aria-hidden="true" tabindex="-1"></a>    <span class="at">structure_effect =</span> structure_effect,</span>
+<span id="cb137-159"><a href="#cb137-159" aria-hidden="true" tabindex="-1"></a>    <span class="at">composition_effect =</span> composition_effect,</span>
+<span id="cb137-160"><a href="#cb137-160" aria-hidden="true" tabindex="-1"></a>    <span class="at">structure_effect_alt =</span> structure_effect_alt,</span>
+<span id="cb137-161"><a href="#cb137-161" aria-hidden="true" tabindex="-1"></a>    <span class="at">composition_effect_alt =</span> composition_effect_alt</span>
+<span id="cb137-162"><a href="#cb137-162" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb137-163"><a href="#cb137-163" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-164"><a href="#cb137-164" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(<span class="fu">list</span>(</span>
+<span id="cb137-165"><a href="#cb137-165" aria-hidden="true" tabindex="-1"></a>    <span class="at">decomposition =</span> decomposition_results,</span>
+<span id="cb137-166"><a href="#cb137-166" aria-hidden="true" tabindex="-1"></a>    <span class="at">sample_sizes =</span> <span class="fu">list</span>(<span class="at">before =</span> <span class="fu">nrow</span>(before_data), <span class="at">after =</span> <span class="fu">nrow</span>(after_data)),</span>
+<span id="cb137-167"><a href="#cb137-167" aria-hidden="true" tabindex="-1"></a>    <span class="at">y_grid =</span> common_y_grid</span>
+<span id="cb137-168"><a href="#cb137-168" aria-hidden="true" tabindex="-1"></a>  ))</span>
+<span id="cb137-169"><a href="#cb137-169" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb137-170"><a href="#cb137-170" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-171"><a href="#cb137-171" aria-hidden="true" tabindex="-1"></a><span class="co"># Bootstrap function for confidence intervals</span></span>
+<span id="cb137-172"><a href="#cb137-172" aria-hidden="true" tabindex="-1"></a>bootstrap_cfm_decomposition <span class="ot">&lt;-</span> <span class="cf">function</span>(data, outcome_var, covariate, group_var,</span>
+<span id="cb137-173"><a href="#cb137-173" aria-hidden="true" tabindex="-1"></a>                                         <span class="at">y_grid =</span> <span class="cn">NULL</span>, <span class="at">n_bootstrap =</span> <span class="dv">200</span>) {</span>
+<span id="cb137-174"><a href="#cb137-174" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-175"><a href="#cb137-175" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Original decomposition</span></span>
+<span id="cb137-176"><a href="#cb137-176" aria-hidden="true" tabindex="-1"></a>  original_results <span class="ot">&lt;-</span> <span class="fu">cfm_decomposition</span>(data, outcome_var, covariate, group_var, y_grid)</span>
+<span id="cb137-177"><a href="#cb137-177" aria-hidden="true" tabindex="-1"></a>  y_grid_common <span class="ot">&lt;-</span> original_results<span class="sc">$</span>y_grid</span>
+<span id="cb137-178"><a href="#cb137-178" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-179"><a href="#cb137-179" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Bootstrap</span></span>
+<span id="cb137-180"><a href="#cb137-180" aria-hidden="true" tabindex="-1"></a>  bootstrap_results <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb137-181"><a href="#cb137-181" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-182"><a href="#cb137-182" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> (b <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n_bootstrap) {</span>
+<span id="cb137-183"><a href="#cb137-183" aria-hidden="true" tabindex="-1"></a>    <span class="fu">tryCatch</span>({</span>
+<span id="cb137-184"><a href="#cb137-184" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Sample with replacement within each group</span></span>
+<span id="cb137-185"><a href="#cb137-185" aria-hidden="true" tabindex="-1"></a>      before_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">FALSE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
+<span id="cb137-186"><a href="#cb137-186" aria-hidden="true" tabindex="-1"></a>      after_data <span class="ot">&lt;-</span> data[data[[group_var]] <span class="sc">==</span> <span class="cn">TRUE</span> <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[outcome_var]]) <span class="sc">&amp;</span> <span class="sc">!</span><span class="fu">is.na</span>(data[[covariate]]), ]</span>
+<span id="cb137-187"><a href="#cb137-187" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-188"><a href="#cb137-188" aria-hidden="true" tabindex="-1"></a>      before_boot <span class="ot">&lt;-</span> before_data[<span class="fu">sample</span>(<span class="fu">nrow</span>(before_data), <span class="at">replace =</span> <span class="cn">TRUE</span>), ]</span>
+<span id="cb137-189"><a href="#cb137-189" aria-hidden="true" tabindex="-1"></a>      after_boot <span class="ot">&lt;-</span> after_data[<span class="fu">sample</span>(<span class="fu">nrow</span>(after_data), <span class="at">replace =</span> <span class="cn">TRUE</span>), ]</span>
+<span id="cb137-190"><a href="#cb137-190" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-191"><a href="#cb137-191" aria-hidden="true" tabindex="-1"></a>      boot_data <span class="ot">&lt;-</span> <span class="fu">rbind</span>(before_boot, after_boot)</span>
+<span id="cb137-192"><a href="#cb137-192" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-193"><a href="#cb137-193" aria-hidden="true" tabindex="-1"></a>      boot_results <span class="ot">&lt;-</span> <span class="fu">cfm_decomposition</span>(boot_data, outcome_var, covariate, group_var, y_grid_common)</span>
+<span id="cb137-194"><a href="#cb137-194" aria-hidden="true" tabindex="-1"></a>      bootstrap_results[[b]] <span class="ot">&lt;-</span> boot_results<span class="sc">$</span>decomposition</span>
+<span id="cb137-195"><a href="#cb137-195" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-196"><a href="#cb137-196" aria-hidden="true" tabindex="-1"></a>    }, <span class="at">error =</span> <span class="cf">function</span>(e) {</span>
+<span id="cb137-197"><a href="#cb137-197" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Silent error handling</span></span>
+<span id="cb137-198"><a href="#cb137-198" aria-hidden="true" tabindex="-1"></a>    })</span>
+<span id="cb137-199"><a href="#cb137-199" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb137-200"><a href="#cb137-200" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-201"><a href="#cb137-201" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Remove failed bootstrap iterations</span></span>
+<span id="cb137-202"><a href="#cb137-202" aria-hidden="true" tabindex="-1"></a>  bootstrap_results <span class="ot">&lt;-</span> bootstrap_results[<span class="sc">!</span><span class="fu">sapply</span>(bootstrap_results, is.null)]</span>
+<span id="cb137-203"><a href="#cb137-203" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-204"><a href="#cb137-204" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">length</span>(bootstrap_results) <span class="sc">&gt;</span> <span class="dv">10</span>) {</span>
+<span id="cb137-205"><a href="#cb137-205" aria-hidden="true" tabindex="-1"></a>    n_successful <span class="ot">&lt;-</span> <span class="fu">length</span>(bootstrap_results)</span>
+<span id="cb137-206"><a href="#cb137-206" aria-hidden="true" tabindex="-1"></a>    n_thresholds <span class="ot">&lt;-</span> <span class="fu">length</span>(y_grid_common)</span>
+<span id="cb137-207"><a href="#cb137-207" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-208"><a href="#cb137-208" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extract bootstrap values</span></span>
+<span id="cb137-209"><a href="#cb137-209" aria-hidden="true" tabindex="-1"></a>    total_change_boot <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, n_successful, n_thresholds)</span>
+<span id="cb137-210"><a href="#cb137-210" aria-hidden="true" tabindex="-1"></a>    structure_boot <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, n_successful, n_thresholds)</span>
+<span id="cb137-211"><a href="#cb137-211" aria-hidden="true" tabindex="-1"></a>    composition_boot <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="cn">NA</span>, n_successful, n_thresholds)</span>
+<span id="cb137-212"><a href="#cb137-212" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-213"><a href="#cb137-213" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n_successful) {</span>
+<span id="cb137-214"><a href="#cb137-214" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (<span class="fu">nrow</span>(bootstrap_results[[i]]) <span class="sc">==</span> n_thresholds) {</span>
+<span id="cb137-215"><a href="#cb137-215" aria-hidden="true" tabindex="-1"></a>        total_change_boot[i, ] <span class="ot">&lt;-</span> bootstrap_results[[i]]<span class="sc">$</span>total_change</span>
+<span id="cb137-216"><a href="#cb137-216" aria-hidden="true" tabindex="-1"></a>        structure_boot[i, ] <span class="ot">&lt;-</span> bootstrap_results[[i]]<span class="sc">$</span>structure_effect</span>
+<span id="cb137-217"><a href="#cb137-217" aria-hidden="true" tabindex="-1"></a>        composition_boot[i, ] <span class="ot">&lt;-</span> bootstrap_results[[i]]<span class="sc">$</span>composition_effect</span>
+<span id="cb137-218"><a href="#cb137-218" aria-hidden="true" tabindex="-1"></a>      }</span>
+<span id="cb137-219"><a href="#cb137-219" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb137-220"><a href="#cb137-220" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-221"><a href="#cb137-221" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Calculate confidence intervals</span></span>
+<span id="cb137-222"><a href="#cb137-222" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>total_ci_lower <span class="ot">&lt;-</span> <span class="fu">apply</span>(total_change_boot, <span class="dv">2</span>, quantile, <span class="fl">0.025</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-223"><a href="#cb137-223" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>total_ci_upper <span class="ot">&lt;-</span> <span class="fu">apply</span>(total_change_boot, <span class="dv">2</span>, quantile, <span class="fl">0.975</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-224"><a href="#cb137-224" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>structure_ci_lower <span class="ot">&lt;-</span> <span class="fu">apply</span>(structure_boot, <span class="dv">2</span>, quantile, <span class="fl">0.025</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-225"><a href="#cb137-225" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>structure_ci_upper <span class="ot">&lt;-</span> <span class="fu">apply</span>(structure_boot, <span class="dv">2</span>, quantile, <span class="fl">0.975</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-226"><a href="#cb137-226" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>composition_ci_lower <span class="ot">&lt;-</span> <span class="fu">apply</span>(composition_boot, <span class="dv">2</span>, quantile, <span class="fl">0.025</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-227"><a href="#cb137-227" aria-hidden="true" tabindex="-1"></a>    original_results<span class="sc">$</span>decomposition<span class="sc">$</span>composition_ci_upper <span class="ot">&lt;-</span> <span class="fu">apply</span>(composition_boot, <span class="dv">2</span>, quantile, <span class="fl">0.975</span>, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb137-228"><a href="#cb137-228" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb137-229"><a href="#cb137-229" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb137-230"><a href="#cb137-230" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(original_results)</span>
+<span id="cb137-231"><a href="#cb137-231" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 </section>
@@ -2341,75 +2470,75 @@ The sign of the rf_fact_t07 effect is ROBUST to the inclusion of controls.</code
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb119"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb119-1"><a href="#cb119-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Run CFM decomposition with bootstrap</span></span>
-<span id="cb119-2"><a href="#cb119-2" aria-hidden="true" tabindex="-1"></a>decomp_results <span class="ot">&lt;-</span> <span class="fu">bootstrap_cfm_decomposition</span>(</span>
-<span id="cb119-3"><a href="#cb119-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> df,</span>
-<span id="cb119-4"><a href="#cb119-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome_var =</span> <span class="st">"first_day_return"</span>,</span>
-<span id="cb119-5"><a href="#cb119-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">covariate =</span> <span class="st">"rf_fact_t07"</span>,</span>
-<span id="cb119-6"><a href="#cb119-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">group_var =</span> <span class="st">"post_omnicare"</span>,</span>
-<span id="cb119-7"><a href="#cb119-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_bootstrap =</span> <span class="dv">500</span></span>
-<span id="cb119-8"><a href="#cb119-8" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb119-9"><a href="#cb119-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb119-10"><a href="#cb119-10" aria-hidden="true" tabindex="-1"></a>decomp_data <span class="ot">&lt;-</span> decomp_results<span class="sc">$</span>decomposition</span>
-<span id="cb119-11"><a href="#cb119-11" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb119-12"><a href="#cb119-12" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"=== CFM DECOMPOSITION SUMMARY ===</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb138"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb138-1"><a href="#cb138-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Run CFM decomposition with bootstrap</span></span>
+<span id="cb138-2"><a href="#cb138-2" aria-hidden="true" tabindex="-1"></a>decomp_results <span class="ot">&lt;-</span> <span class="fu">bootstrap_cfm_decomposition</span>(</span>
+<span id="cb138-3"><a href="#cb138-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> df,</span>
+<span id="cb138-4"><a href="#cb138-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">outcome_var =</span> <span class="st">"first_day_return"</span>,</span>
+<span id="cb138-5"><a href="#cb138-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">covariate =</span> <span class="st">"rf_fact_t07"</span>,</span>
+<span id="cb138-6"><a href="#cb138-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">group_var =</span> <span class="st">"post_omnicare"</span>,</span>
+<span id="cb138-7"><a href="#cb138-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_bootstrap =</span> <span class="dv">500</span></span>
+<span id="cb138-8"><a href="#cb138-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb138-9"><a href="#cb138-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb138-10"><a href="#cb138-10" aria-hidden="true" tabindex="-1"></a>decomp_data <span class="ot">&lt;-</span> decomp_results<span class="sc">$</span>decomposition</span>
+<span id="cb138-11"><a href="#cb138-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb138-12"><a href="#cb138-12" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"=== CFM DECOMPOSITION SUMMARY ===</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>=== CFM DECOMPOSITION SUMMARY ===</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb121"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb121-1"><a href="#cb121-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Sample sizes:</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb140"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb140-1"><a href="#cb140-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Sample sizes:</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>Sample sizes:</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb123"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb123-1"><a href="#cb123-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Pre-Omnicare:"</span>, decomp_results<span class="sc">$</span>sample_sizes<span class="sc">$</span>before, <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb142"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb142-1"><a href="#cb142-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Pre-Omnicare:"</span>, decomp_results<span class="sc">$</span>sample_sizes<span class="sc">$</span>before, <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Pre-Omnicare: 882 </code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb125"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb125-1"><a href="#cb125-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Post-Omnicare:"</span>, decomp_results<span class="sc">$</span>sample_sizes<span class="sc">$</span>after, <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb144"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb144-1"><a href="#cb144-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Post-Omnicare:"</span>, decomp_results<span class="sc">$</span>sample_sizes<span class="sc">$</span>after, <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Post-Omnicare: 1347 </code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb127"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb127-1"><a href="#cb127-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Number of thresholds:"</span>, <span class="fu">length</span>(decomp_results<span class="sc">$</span>y_grid), <span class="st">"</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb146"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb146-1"><a href="#cb146-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"  Number of thresholds:"</span>, <span class="fu">length</span>(decomp_results<span class="sc">$</span>y_grid), <span class="st">"</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Number of thresholds: 19 </code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb129"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb129-1"><a href="#cb129-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Average effects across distribution</span></span>
-<span id="cb129-2"><a href="#cb129-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Average effects across the distribution:</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb148"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb148-1"><a href="#cb148-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Average effects across distribution</span></span>
+<span id="cb148-2"><a href="#cb148-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Average effects across the distribution:</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>Average effects across the distribution:</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb131"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb131-1"><a href="#cb131-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Total change: %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(decomp_data<span class="sc">$</span>total_change)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb150"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb150-1"><a href="#cb150-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Total change: %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(decomp_data<span class="sc">$</span>total_change)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Total change: -0.0400</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb133"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb133-1"><a href="#cb133-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Structure effect: %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(decomp_data<span class="sc">$</span>structure_effect)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb152"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb152-1"><a href="#cb152-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Structure effect: %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(decomp_data<span class="sc">$</span>structure_effect)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Structure effect: -0.0216</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb135"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb135-1"><a href="#cb135-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Composition effect: %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(decomp_data<span class="sc">$</span>composition_effect)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb154"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb154-1"><a href="#cb154-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Composition effect: %.4f</span><span class="sc">\n</span><span class="st">"</span>, <span class="fu">mean</span>(decomp_data<span class="sc">$</span>composition_effect)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Composition effect: -0.0184</code></pre>
@@ -2421,46 +2550,46 @@ The sign of the rf_fact_t07 effect is ROBUST to the inclusion of controls.</code
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb137"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb137-1"><a href="#cb137-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Reshape for plotting</span></span>
-<span id="cb137-2"><a href="#cb137-2" aria-hidden="true" tabindex="-1"></a>dist_long <span class="ot">&lt;-</span> decomp_data <span class="sc">|&gt;</span></span>
-<span id="cb137-3"><a href="#cb137-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">select</span>(y_threshold, F_before_before, F_after_after, F_before_after, F_after_before) <span class="sc">|&gt;</span></span>
-<span id="cb137-4"><a href="#cb137-4" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="at">cols =</span> <span class="sc">-</span>y_threshold, <span class="at">names_to =</span> <span class="st">"distribution"</span>, <span class="at">values_to =</span> <span class="st">"cdf_value"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb137-5"><a href="#cb137-5" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
-<span id="cb137-6"><a href="#cb137-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">dist_label =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
-<span id="cb137-7"><a href="#cb137-7" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_before_before"</span> <span class="sc">~</span> <span class="st">"Observed Pre-Omnicare"</span>,</span>
-<span id="cb137-8"><a href="#cb137-8" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_after_after"</span> <span class="sc">~</span> <span class="st">"Observed Post-Omnicare"</span>,</span>
-<span id="cb137-9"><a href="#cb137-9" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_before_after"</span> <span class="sc">~</span> <span class="st">"Pre Structure + Post Composition"</span>,</span>
-<span id="cb137-10"><a href="#cb137-10" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_after_before"</span> <span class="sc">~</span> <span class="st">"Post Structure + Pre Composition"</span></span>
-<span id="cb137-11"><a href="#cb137-11" aria-hidden="true" tabindex="-1"></a>    ),</span>
-<span id="cb137-12"><a href="#cb137-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">dist_type =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
-<span id="cb137-13"><a href="#cb137-13" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">"F_before_before"</span>, <span class="st">"F_after_after"</span>) <span class="sc">~</span> <span class="st">"Observed"</span>,</span>
-<span id="cb137-14"><a href="#cb137-14" aria-hidden="true" tabindex="-1"></a>      <span class="cn">TRUE</span> <span class="sc">~</span> <span class="st">"Counterfactual"</span></span>
-<span id="cb137-15"><a href="#cb137-15" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb137-16"><a href="#cb137-16" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb137-17"><a href="#cb137-17" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb137-18"><a href="#cb137-18" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(dist_long, <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">y =</span> cdf_value, <span class="at">color =</span> dist_label, <span class="at">linetype =</span> dist_type)) <span class="sc">+</span></span>
-<span id="cb137-19"><a href="#cb137-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.1</span>) <span class="sc">+</span></span>
-<span id="cb137-20"><a href="#cb137-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_linetype_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Observed"</span> <span class="ot">=</span> <span class="st">"solid"</span>, <span class="st">"Counterfactual"</span> <span class="ot">=</span> <span class="st">"dashed"</span>)) <span class="sc">+</span></span>
-<span id="cb137-21"><a href="#cb137-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(</span>
-<span id="cb137-22"><a href="#cb137-22" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Observed Pre-Omnicare"</span> <span class="ot">=</span> <span class="st">"coral"</span>,</span>
-<span id="cb137-23"><a href="#cb137-23" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Observed Post-Omnicare"</span> <span class="ot">=</span> <span class="st">"steelblue"</span>,</span>
-<span id="cb137-24"><a href="#cb137-24" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Pre Structure + Post Composition"</span> <span class="ot">=</span> <span class="st">"darkgreen"</span>,</span>
-<span id="cb137-25"><a href="#cb137-25" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Post Structure + Pre Composition"</span> <span class="ot">=</span> <span class="st">"purple"</span></span>
-<span id="cb137-26"><a href="#cb137-26" aria-hidden="true" tabindex="-1"></a>  )) <span class="sc">+</span></span>
-<span id="cb137-27"><a href="#cb137-27" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
-<span id="cb137-28"><a href="#cb137-28" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"CFM Decomposition: Observed and Counterfactual CDFs"</span>,</span>
-<span id="cb137-29"><a href="#cb137-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">subtitle =</span> <span class="st">"First-day return distributions pre vs. post Omnicare"</span>,</span>
-<span id="cb137-30"><a href="#cb137-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"First-Day Return"</span>,</span>
-<span id="cb137-31"><a href="#cb137-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Cumulative Probability F(return)"</span>,</span>
-<span id="cb137-32"><a href="#cb137-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">color =</span> <span class="st">"Distribution"</span>,</span>
-<span id="cb137-33"><a href="#cb137-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">linetype =</span> <span class="st">"Type"</span></span>
-<span id="cb137-34"><a href="#cb137-34" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb137-35"><a href="#cb137-35" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
-<span id="cb137-36"><a href="#cb137-36" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(</span>
-<span id="cb137-37"><a href="#cb137-37" aria-hidden="true" tabindex="-1"></a>    <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>, <span class="at">size =</span> <span class="dv">14</span>),</span>
-<span id="cb137-38"><a href="#cb137-38" aria-hidden="true" tabindex="-1"></a>    <span class="at">legend.position =</span> <span class="st">"bottom"</span></span>
-<span id="cb137-39"><a href="#cb137-39" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
-<span id="cb137-40"><a href="#cb137-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">guides</span>(<span class="at">color =</span> <span class="fu">guide_legend</span>(<span class="at">nrow =</span> <span class="dv">2</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb156"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb156-1"><a href="#cb156-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Reshape for plotting</span></span>
+<span id="cb156-2"><a href="#cb156-2" aria-hidden="true" tabindex="-1"></a>dist_long <span class="ot">&lt;-</span> decomp_data <span class="sc">|&gt;</span></span>
+<span id="cb156-3"><a href="#cb156-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">select</span>(y_threshold, F_before_before, F_after_after, F_before_after, F_after_before) <span class="sc">|&gt;</span></span>
+<span id="cb156-4"><a href="#cb156-4" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="at">cols =</span> <span class="sc">-</span>y_threshold, <span class="at">names_to =</span> <span class="st">"distribution"</span>, <span class="at">values_to =</span> <span class="st">"cdf_value"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb156-5"><a href="#cb156-5" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb156-6"><a href="#cb156-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">dist_label =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
+<span id="cb156-7"><a href="#cb156-7" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_before_before"</span> <span class="sc">~</span> <span class="st">"Observed Pre-Omnicare"</span>,</span>
+<span id="cb156-8"><a href="#cb156-8" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_after_after"</span> <span class="sc">~</span> <span class="st">"Observed Post-Omnicare"</span>,</span>
+<span id="cb156-9"><a href="#cb156-9" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_before_after"</span> <span class="sc">~</span> <span class="st">"Pre Structure + Post Composition"</span>,</span>
+<span id="cb156-10"><a href="#cb156-10" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">==</span> <span class="st">"F_after_before"</span> <span class="sc">~</span> <span class="st">"Post Structure + Pre Composition"</span></span>
+<span id="cb156-11"><a href="#cb156-11" aria-hidden="true" tabindex="-1"></a>    ),</span>
+<span id="cb156-12"><a href="#cb156-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">dist_type =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
+<span id="cb156-13"><a href="#cb156-13" aria-hidden="true" tabindex="-1"></a>      distribution <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">"F_before_before"</span>, <span class="st">"F_after_after"</span>) <span class="sc">~</span> <span class="st">"Observed"</span>,</span>
+<span id="cb156-14"><a href="#cb156-14" aria-hidden="true" tabindex="-1"></a>      <span class="cn">TRUE</span> <span class="sc">~</span> <span class="st">"Counterfactual"</span></span>
+<span id="cb156-15"><a href="#cb156-15" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb156-16"><a href="#cb156-16" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb156-17"><a href="#cb156-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb156-18"><a href="#cb156-18" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(dist_long, <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">y =</span> cdf_value, <span class="at">color =</span> dist_label, <span class="at">linetype =</span> dist_type)) <span class="sc">+</span></span>
+<span id="cb156-19"><a href="#cb156-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.1</span>) <span class="sc">+</span></span>
+<span id="cb156-20"><a href="#cb156-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_linetype_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(<span class="st">"Observed"</span> <span class="ot">=</span> <span class="st">"solid"</span>, <span class="st">"Counterfactual"</span> <span class="ot">=</span> <span class="st">"dashed"</span>)) <span class="sc">+</span></span>
+<span id="cb156-21"><a href="#cb156-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(</span>
+<span id="cb156-22"><a href="#cb156-22" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Observed Pre-Omnicare"</span> <span class="ot">=</span> <span class="st">"coral"</span>,</span>
+<span id="cb156-23"><a href="#cb156-23" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Observed Post-Omnicare"</span> <span class="ot">=</span> <span class="st">"steelblue"</span>,</span>
+<span id="cb156-24"><a href="#cb156-24" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Pre Structure + Post Composition"</span> <span class="ot">=</span> <span class="st">"darkgreen"</span>,</span>
+<span id="cb156-25"><a href="#cb156-25" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Post Structure + Pre Composition"</span> <span class="ot">=</span> <span class="st">"purple"</span></span>
+<span id="cb156-26"><a href="#cb156-26" aria-hidden="true" tabindex="-1"></a>  )) <span class="sc">+</span></span>
+<span id="cb156-27"><a href="#cb156-27" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb156-28"><a href="#cb156-28" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"CFM Decomposition: Observed and Counterfactual CDFs"</span>,</span>
+<span id="cb156-29"><a href="#cb156-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">subtitle =</span> <span class="st">"First-day return distributions pre vs. post Omnicare"</span>,</span>
+<span id="cb156-30"><a href="#cb156-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"First-Day Return"</span>,</span>
+<span id="cb156-31"><a href="#cb156-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Cumulative Probability F(return)"</span>,</span>
+<span id="cb156-32"><a href="#cb156-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">color =</span> <span class="st">"Distribution"</span>,</span>
+<span id="cb156-33"><a href="#cb156-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">linetype =</span> <span class="st">"Type"</span></span>
+<span id="cb156-34"><a href="#cb156-34" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb156-35"><a href="#cb156-35" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
+<span id="cb156-36"><a href="#cb156-36" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(</span>
+<span id="cb156-37"><a href="#cb156-37" aria-hidden="true" tabindex="-1"></a>    <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>, <span class="at">size =</span> <span class="dv">14</span>),</span>
+<span id="cb156-38"><a href="#cb156-38" aria-hidden="true" tabindex="-1"></a>    <span class="at">legend.position =</span> <span class="st">"bottom"</span></span>
+<span id="cb156-39"><a href="#cb156-39" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb156-40"><a href="#cb156-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">guides</span>(<span class="at">color =</span> <span class="fu">guide_legend</span>(<span class="at">nrow =</span> <span class="dv">2</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
@@ -2477,78 +2606,78 @@ The sign of the rf_fact_t07 effect is ROBUST to the inclusion of controls.</code
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb138"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb138-1"><a href="#cb138-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Reshape effects for plotting</span></span>
-<span id="cb138-2"><a href="#cb138-2" aria-hidden="true" tabindex="-1"></a>effect_long <span class="ot">&lt;-</span> decomp_data <span class="sc">|&gt;</span></span>
-<span id="cb138-3"><a href="#cb138-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">select</span>(y_threshold, total_change, structure_effect, composition_effect) <span class="sc">|&gt;</span></span>
-<span id="cb138-4"><a href="#cb138-4" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="at">cols =</span> <span class="sc">-</span>y_threshold, <span class="at">names_to =</span> <span class="st">"effect_type"</span>, <span class="at">values_to =</span> <span class="st">"effect_value"</span>) <span class="sc">|&gt;</span></span>
-<span id="cb138-5"><a href="#cb138-5" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
-<span id="cb138-6"><a href="#cb138-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">effect_label =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
-<span id="cb138-7"><a href="#cb138-7" aria-hidden="true" tabindex="-1"></a>      effect_type <span class="sc">==</span> <span class="st">"total_change"</span> <span class="sc">~</span> <span class="st">"Total Change"</span>,</span>
-<span id="cb138-8"><a href="#cb138-8" aria-hidden="true" tabindex="-1"></a>      effect_type <span class="sc">==</span> <span class="st">"structure_effect"</span> <span class="sc">~</span> <span class="st">"Structure Effect (Pricing)"</span>,</span>
-<span id="cb138-9"><a href="#cb138-9" aria-hidden="true" tabindex="-1"></a>      effect_type <span class="sc">==</span> <span class="st">"composition_effect"</span> <span class="sc">~</span> <span class="st">"Composition Effect (rf_fact distribution)"</span></span>
-<span id="cb138-10"><a href="#cb138-10" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb138-11"><a href="#cb138-11" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb138-12"><a href="#cb138-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb138-13"><a href="#cb138-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Check if we have confidence intervals</span></span>
-<span id="cb138-14"><a href="#cb138-14" aria-hidden="true" tabindex="-1"></a>has_ci <span class="ot">&lt;-</span> <span class="st">"total_ci_lower"</span> <span class="sc">%in%</span> <span class="fu">names</span>(decomp_data)</span>
-<span id="cb138-15"><a href="#cb138-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb138-16"><a href="#cb138-16" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (has_ci) {</span>
-<span id="cb138-17"><a href="#cb138-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>() <span class="sc">+</span></span>
-<span id="cb138-18"><a href="#cb138-18" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Confidence ribbons</span></span>
-<span id="cb138-19"><a href="#cb138-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_ribbon</span>(<span class="at">data =</span> decomp_data,</span>
-<span id="cb138-20"><a href="#cb138-20" aria-hidden="true" tabindex="-1"></a>                <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">ymin =</span> total_ci_lower, <span class="at">ymax =</span> total_ci_upper),</span>
-<span id="cb138-21"><a href="#cb138-21" aria-hidden="true" tabindex="-1"></a>                <span class="at">fill =</span> <span class="st">"black"</span>, <span class="at">alpha =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
-<span id="cb138-22"><a href="#cb138-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_ribbon</span>(<span class="at">data =</span> decomp_data,</span>
-<span id="cb138-23"><a href="#cb138-23" aria-hidden="true" tabindex="-1"></a>                <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">ymin =</span> structure_ci_lower, <span class="at">ymax =</span> structure_ci_upper),</span>
-<span id="cb138-24"><a href="#cb138-24" aria-hidden="true" tabindex="-1"></a>                <span class="at">fill =</span> <span class="st">"red"</span>, <span class="at">alpha =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
-<span id="cb138-25"><a href="#cb138-25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_ribbon</span>(<span class="at">data =</span> decomp_data,</span>
-<span id="cb138-26"><a href="#cb138-26" aria-hidden="true" tabindex="-1"></a>                <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">ymin =</span> composition_ci_lower, <span class="at">ymax =</span> composition_ci_upper),</span>
-<span id="cb138-27"><a href="#cb138-27" aria-hidden="true" tabindex="-1"></a>                <span class="at">fill =</span> <span class="st">"blue"</span>, <span class="at">alpha =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
-<span id="cb138-28"><a href="#cb138-28" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Effect lines</span></span>
-<span id="cb138-29"><a href="#cb138-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">data =</span> effect_long,</span>
-<span id="cb138-30"><a href="#cb138-30" aria-hidden="true" tabindex="-1"></a>              <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">y =</span> effect_value, <span class="at">color =</span> effect_label),</span>
-<span id="cb138-31"><a href="#cb138-31" aria-hidden="true" tabindex="-1"></a>              <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
-<span id="cb138-32"><a href="#cb138-32" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">alpha =</span> <span class="fl">0.5</span>) <span class="sc">+</span></span>
-<span id="cb138-33"><a href="#cb138-33" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(</span>
-<span id="cb138-34"><a href="#cb138-34" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Total Change"</span> <span class="ot">=</span> <span class="st">"black"</span>,</span>
-<span id="cb138-35"><a href="#cb138-35" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Structure Effect (Pricing)"</span> <span class="ot">=</span> <span class="st">"red"</span>,</span>
-<span id="cb138-36"><a href="#cb138-36" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Composition Effect (rf_fact distribution)"</span> <span class="ot">=</span> <span class="st">"blue"</span></span>
-<span id="cb138-37"><a href="#cb138-37" aria-hidden="true" tabindex="-1"></a>    )) <span class="sc">+</span></span>
-<span id="cb138-38"><a href="#cb138-38" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
-<span id="cb138-39"><a href="#cb138-39" aria-hidden="true" tabindex="-1"></a>      <span class="at">title =</span> <span class="st">"CFM Decomposition: Structure vs. Composition Effects"</span>,</span>
-<span id="cb138-40"><a href="#cb138-40" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Total change = Structure effect + Composition effect"</span>,</span>
-<span id="cb138-41"><a href="#cb138-41" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">"First-Day Return Threshold"</span>,</span>
-<span id="cb138-42"><a href="#cb138-42" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="st">"Change in Cumulative Probability"</span>,</span>
-<span id="cb138-43"><a href="#cb138-43" aria-hidden="true" tabindex="-1"></a>      <span class="at">color =</span> <span class="st">"Effect Type"</span>,</span>
-<span id="cb138-44"><a href="#cb138-44" aria-hidden="true" tabindex="-1"></a>      <span class="at">caption =</span> <span class="st">"Shaded areas: 95% bootstrap confidence intervals"</span></span>
-<span id="cb138-45"><a href="#cb138-45" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb138-46"><a href="#cb138-46" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
-<span id="cb138-47"><a href="#cb138-47" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(</span>
-<span id="cb138-48"><a href="#cb138-48" aria-hidden="true" tabindex="-1"></a>      <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>, <span class="at">size =</span> <span class="dv">14</span>),</span>
-<span id="cb138-49"><a href="#cb138-49" aria-hidden="true" tabindex="-1"></a>      <span class="at">legend.position =</span> <span class="st">"bottom"</span></span>
-<span id="cb138-50"><a href="#cb138-50" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb138-51"><a href="#cb138-51" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb138-52"><a href="#cb138-52" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(effect_long, <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">y =</span> effect_value, <span class="at">color =</span> effect_label)) <span class="sc">+</span></span>
-<span id="cb138-53"><a href="#cb138-53" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
-<span id="cb138-54"><a href="#cb138-54" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">alpha =</span> <span class="fl">0.5</span>) <span class="sc">+</span></span>
-<span id="cb138-55"><a href="#cb138-55" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(</span>
-<span id="cb138-56"><a href="#cb138-56" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Total Change"</span> <span class="ot">=</span> <span class="st">"black"</span>,</span>
-<span id="cb138-57"><a href="#cb138-57" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Structure Effect (Pricing)"</span> <span class="ot">=</span> <span class="st">"red"</span>,</span>
-<span id="cb138-58"><a href="#cb138-58" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Composition Effect (rf_fact distribution)"</span> <span class="ot">=</span> <span class="st">"blue"</span></span>
-<span id="cb138-59"><a href="#cb138-59" aria-hidden="true" tabindex="-1"></a>    )) <span class="sc">+</span></span>
-<span id="cb138-60"><a href="#cb138-60" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
-<span id="cb138-61"><a href="#cb138-61" aria-hidden="true" tabindex="-1"></a>      <span class="at">title =</span> <span class="st">"CFM Decomposition: Structure vs. Composition Effects"</span>,</span>
-<span id="cb138-62"><a href="#cb138-62" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Total change = Structure effect + Composition effect"</span>,</span>
-<span id="cb138-63"><a href="#cb138-63" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">"First-Day Return Threshold"</span>,</span>
-<span id="cb138-64"><a href="#cb138-64" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="st">"Change in Cumulative Probability"</span>,</span>
-<span id="cb138-65"><a href="#cb138-65" aria-hidden="true" tabindex="-1"></a>      <span class="at">color =</span> <span class="st">"Effect Type"</span></span>
-<span id="cb138-66"><a href="#cb138-66" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb138-67"><a href="#cb138-67" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
-<span id="cb138-68"><a href="#cb138-68" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(</span>
-<span id="cb138-69"><a href="#cb138-69" aria-hidden="true" tabindex="-1"></a>      <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>, <span class="at">size =</span> <span class="dv">14</span>),</span>
-<span id="cb138-70"><a href="#cb138-70" aria-hidden="true" tabindex="-1"></a>      <span class="at">legend.position =</span> <span class="st">"bottom"</span></span>
-<span id="cb138-71"><a href="#cb138-71" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb138-72"><a href="#cb138-72" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb157"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb157-1"><a href="#cb157-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Reshape effects for plotting</span></span>
+<span id="cb157-2"><a href="#cb157-2" aria-hidden="true" tabindex="-1"></a>effect_long <span class="ot">&lt;-</span> decomp_data <span class="sc">|&gt;</span></span>
+<span id="cb157-3"><a href="#cb157-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">select</span>(y_threshold, total_change, structure_effect, composition_effect) <span class="sc">|&gt;</span></span>
+<span id="cb157-4"><a href="#cb157-4" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(<span class="at">cols =</span> <span class="sc">-</span>y_threshold, <span class="at">names_to =</span> <span class="st">"effect_type"</span>, <span class="at">values_to =</span> <span class="st">"effect_value"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb157-5"><a href="#cb157-5" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb157-6"><a href="#cb157-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">effect_label =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
+<span id="cb157-7"><a href="#cb157-7" aria-hidden="true" tabindex="-1"></a>      effect_type <span class="sc">==</span> <span class="st">"total_change"</span> <span class="sc">~</span> <span class="st">"Total Change"</span>,</span>
+<span id="cb157-8"><a href="#cb157-8" aria-hidden="true" tabindex="-1"></a>      effect_type <span class="sc">==</span> <span class="st">"structure_effect"</span> <span class="sc">~</span> <span class="st">"Structure Effect (Pricing)"</span>,</span>
+<span id="cb157-9"><a href="#cb157-9" aria-hidden="true" tabindex="-1"></a>      effect_type <span class="sc">==</span> <span class="st">"composition_effect"</span> <span class="sc">~</span> <span class="st">"Composition Effect (rf_fact distribution)"</span></span>
+<span id="cb157-10"><a href="#cb157-10" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb157-11"><a href="#cb157-11" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb157-12"><a href="#cb157-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb157-13"><a href="#cb157-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Check if we have confidence intervals</span></span>
+<span id="cb157-14"><a href="#cb157-14" aria-hidden="true" tabindex="-1"></a>has_ci <span class="ot">&lt;-</span> <span class="st">"total_ci_lower"</span> <span class="sc">%in%</span> <span class="fu">names</span>(decomp_data)</span>
+<span id="cb157-15"><a href="#cb157-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb157-16"><a href="#cb157-16" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (has_ci) {</span>
+<span id="cb157-17"><a href="#cb157-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>() <span class="sc">+</span></span>
+<span id="cb157-18"><a href="#cb157-18" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Confidence ribbons</span></span>
+<span id="cb157-19"><a href="#cb157-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_ribbon</span>(<span class="at">data =</span> decomp_data,</span>
+<span id="cb157-20"><a href="#cb157-20" aria-hidden="true" tabindex="-1"></a>                <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">ymin =</span> total_ci_lower, <span class="at">ymax =</span> total_ci_upper),</span>
+<span id="cb157-21"><a href="#cb157-21" aria-hidden="true" tabindex="-1"></a>                <span class="at">fill =</span> <span class="st">"black"</span>, <span class="at">alpha =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
+<span id="cb157-22"><a href="#cb157-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_ribbon</span>(<span class="at">data =</span> decomp_data,</span>
+<span id="cb157-23"><a href="#cb157-23" aria-hidden="true" tabindex="-1"></a>                <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">ymin =</span> structure_ci_lower, <span class="at">ymax =</span> structure_ci_upper),</span>
+<span id="cb157-24"><a href="#cb157-24" aria-hidden="true" tabindex="-1"></a>                <span class="at">fill =</span> <span class="st">"red"</span>, <span class="at">alpha =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
+<span id="cb157-25"><a href="#cb157-25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_ribbon</span>(<span class="at">data =</span> decomp_data,</span>
+<span id="cb157-26"><a href="#cb157-26" aria-hidden="true" tabindex="-1"></a>                <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">ymin =</span> composition_ci_lower, <span class="at">ymax =</span> composition_ci_upper),</span>
+<span id="cb157-27"><a href="#cb157-27" aria-hidden="true" tabindex="-1"></a>                <span class="at">fill =</span> <span class="st">"blue"</span>, <span class="at">alpha =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
+<span id="cb157-28"><a href="#cb157-28" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Effect lines</span></span>
+<span id="cb157-29"><a href="#cb157-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">data =</span> effect_long,</span>
+<span id="cb157-30"><a href="#cb157-30" aria-hidden="true" tabindex="-1"></a>              <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">y =</span> effect_value, <span class="at">color =</span> effect_label),</span>
+<span id="cb157-31"><a href="#cb157-31" aria-hidden="true" tabindex="-1"></a>              <span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb157-32"><a href="#cb157-32" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">alpha =</span> <span class="fl">0.5</span>) <span class="sc">+</span></span>
+<span id="cb157-33"><a href="#cb157-33" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(</span>
+<span id="cb157-34"><a href="#cb157-34" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Total Change"</span> <span class="ot">=</span> <span class="st">"black"</span>,</span>
+<span id="cb157-35"><a href="#cb157-35" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Structure Effect (Pricing)"</span> <span class="ot">=</span> <span class="st">"red"</span>,</span>
+<span id="cb157-36"><a href="#cb157-36" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Composition Effect (rf_fact distribution)"</span> <span class="ot">=</span> <span class="st">"blue"</span></span>
+<span id="cb157-37"><a href="#cb157-37" aria-hidden="true" tabindex="-1"></a>    )) <span class="sc">+</span></span>
+<span id="cb157-38"><a href="#cb157-38" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb157-39"><a href="#cb157-39" aria-hidden="true" tabindex="-1"></a>      <span class="at">title =</span> <span class="st">"CFM Decomposition: Structure vs. Composition Effects"</span>,</span>
+<span id="cb157-40"><a href="#cb157-40" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Total change = Structure effect + Composition effect"</span>,</span>
+<span id="cb157-41"><a href="#cb157-41" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">"First-Day Return Threshold"</span>,</span>
+<span id="cb157-42"><a href="#cb157-42" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="st">"Change in Cumulative Probability"</span>,</span>
+<span id="cb157-43"><a href="#cb157-43" aria-hidden="true" tabindex="-1"></a>      <span class="at">color =</span> <span class="st">"Effect Type"</span>,</span>
+<span id="cb157-44"><a href="#cb157-44" aria-hidden="true" tabindex="-1"></a>      <span class="at">caption =</span> <span class="st">"Shaded areas: 95% bootstrap confidence intervals"</span></span>
+<span id="cb157-45"><a href="#cb157-45" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb157-46"><a href="#cb157-46" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
+<span id="cb157-47"><a href="#cb157-47" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(</span>
+<span id="cb157-48"><a href="#cb157-48" aria-hidden="true" tabindex="-1"></a>      <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>, <span class="at">size =</span> <span class="dv">14</span>),</span>
+<span id="cb157-49"><a href="#cb157-49" aria-hidden="true" tabindex="-1"></a>      <span class="at">legend.position =</span> <span class="st">"bottom"</span></span>
+<span id="cb157-50"><a href="#cb157-50" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb157-51"><a href="#cb157-51" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb157-52"><a href="#cb157-52" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(effect_long, <span class="fu">aes</span>(<span class="at">x =</span> y_threshold, <span class="at">y =</span> effect_value, <span class="at">color =</span> effect_label)) <span class="sc">+</span></span>
+<span id="cb157-53"><a href="#cb157-53" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">linewidth =</span> <span class="fl">1.2</span>) <span class="sc">+</span></span>
+<span id="cb157-54"><a href="#cb157-54" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_hline</span>(<span class="at">yintercept =</span> <span class="dv">0</span>, <span class="at">linetype =</span> <span class="st">"dashed"</span>, <span class="at">alpha =</span> <span class="fl">0.5</span>) <span class="sc">+</span></span>
+<span id="cb157-55"><a href="#cb157-55" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_color_manual</span>(<span class="at">values =</span> <span class="fu">c</span>(</span>
+<span id="cb157-56"><a href="#cb157-56" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Total Change"</span> <span class="ot">=</span> <span class="st">"black"</span>,</span>
+<span id="cb157-57"><a href="#cb157-57" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Structure Effect (Pricing)"</span> <span class="ot">=</span> <span class="st">"red"</span>,</span>
+<span id="cb157-58"><a href="#cb157-58" aria-hidden="true" tabindex="-1"></a>      <span class="st">"Composition Effect (rf_fact distribution)"</span> <span class="ot">=</span> <span class="st">"blue"</span></span>
+<span id="cb157-59"><a href="#cb157-59" aria-hidden="true" tabindex="-1"></a>    )) <span class="sc">+</span></span>
+<span id="cb157-60"><a href="#cb157-60" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb157-61"><a href="#cb157-61" aria-hidden="true" tabindex="-1"></a>      <span class="at">title =</span> <span class="st">"CFM Decomposition: Structure vs. Composition Effects"</span>,</span>
+<span id="cb157-62"><a href="#cb157-62" aria-hidden="true" tabindex="-1"></a>      <span class="at">subtitle =</span> <span class="st">"Total change = Structure effect + Composition effect"</span>,</span>
+<span id="cb157-63"><a href="#cb157-63" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">"First-Day Return Threshold"</span>,</span>
+<span id="cb157-64"><a href="#cb157-64" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="st">"Change in Cumulative Probability"</span>,</span>
+<span id="cb157-65"><a href="#cb157-65" aria-hidden="true" tabindex="-1"></a>      <span class="at">color =</span> <span class="st">"Effect Type"</span></span>
+<span id="cb157-66"><a href="#cb157-66" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb157-67"><a href="#cb157-67" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
+<span id="cb157-68"><a href="#cb157-68" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(</span>
+<span id="cb157-69"><a href="#cb157-69" aria-hidden="true" tabindex="-1"></a>      <span class="at">plot.title =</span> <span class="fu">element_text</span>(<span class="at">face =</span> <span class="st">"bold"</span>, <span class="at">size =</span> <span class="dv">14</span>),</span>
+<span id="cb157-70"><a href="#cb157-70" aria-hidden="true" tabindex="-1"></a>      <span class="at">legend.position =</span> <span class="st">"bottom"</span></span>
+<span id="cb157-71"><a href="#cb157-71" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb157-72"><a href="#cb157-72" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
@@ -2565,29 +2694,29 @@ The sign of the rf_fact_t07 effect is ROBUST to the inclusion of controls.</code
 <div class="cell">
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb139"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb139-1"><a href="#cb139-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"=== INTERPRETATION ===</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb158"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb158-1"><a href="#cb158-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"=== INTERPRETATION ===</span><span class="sc">\n\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>=== INTERPRETATION ===</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb141"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb141-1"><a href="#cb141-1" aria-hidden="true" tabindex="-1"></a>avg_total <span class="ot">&lt;-</span> <span class="fu">mean</span>(decomp_data<span class="sc">$</span>total_change)</span>
-<span id="cb141-2"><a href="#cb141-2" aria-hidden="true" tabindex="-1"></a>avg_structure <span class="ot">&lt;-</span> <span class="fu">mean</span>(decomp_data<span class="sc">$</span>structure_effect)</span>
-<span id="cb141-3"><a href="#cb141-3" aria-hidden="true" tabindex="-1"></a>avg_composition <span class="ot">&lt;-</span> <span class="fu">mean</span>(decomp_data<span class="sc">$</span>composition_effect)</span>
-<span id="cb141-4"><a href="#cb141-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb141-5"><a href="#cb141-5" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (avg_total <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
-<span id="cb141-6"><a href="#cb141-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"TOTAL CHANGE: Post-Omnicare has MORE mass at lower returns (less underpricing overall).</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb141-7"><a href="#cb141-7" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb141-8"><a href="#cb141-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"TOTAL CHANGE: Post-Omnicare has LESS mass at lower returns (more underpricing overall).</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb141-9"><a href="#cb141-9" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb160"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb160-1"><a href="#cb160-1" aria-hidden="true" tabindex="-1"></a>avg_total <span class="ot">&lt;-</span> <span class="fu">mean</span>(decomp_data<span class="sc">$</span>total_change)</span>
+<span id="cb160-2"><a href="#cb160-2" aria-hidden="true" tabindex="-1"></a>avg_structure <span class="ot">&lt;-</span> <span class="fu">mean</span>(decomp_data<span class="sc">$</span>structure_effect)</span>
+<span id="cb160-3"><a href="#cb160-3" aria-hidden="true" tabindex="-1"></a>avg_composition <span class="ot">&lt;-</span> <span class="fu">mean</span>(decomp_data<span class="sc">$</span>composition_effect)</span>
+<span id="cb160-4"><a href="#cb160-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb160-5"><a href="#cb160-5" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (avg_total <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
+<span id="cb160-6"><a href="#cb160-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"TOTAL CHANGE: Post-Omnicare has MORE mass at lower returns (less underpricing overall).</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb160-7"><a href="#cb160-7" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb160-8"><a href="#cb160-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"TOTAL CHANGE: Post-Omnicare has LESS mass at lower returns (more underpricing overall).</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb160-9"><a href="#cb160-9" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>TOTAL CHANGE: Post-Omnicare has LESS mass at lower returns (more underpricing overall).</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb143"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb143-1"><a href="#cb143-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">DECOMPOSITION:</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb162"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb162-1"><a href="#cb162-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">DECOMPOSITION:</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>
@@ -2595,15 +2724,15 @@ DECOMPOSITION:</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb145"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb145-1"><a href="#cb145-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Structure effect interpretation</span></span>
-<span id="cb145-2"><a href="#cb145-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (avg_structure <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
-<span id="cb145-3"><a href="#cb145-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"- STRUCTURE EFFECT ("</span>, <span class="fu">round</span>(avg_structure, <span class="dv">4</span>), <span class="st">"): The market PRICES IPOs differently post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb145-4"><a href="#cb145-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  For the same level of fact-intensity, post-Omnicare IPOs have LESS underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb145-5"><a href="#cb145-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  This suggests the market reacted to Omnicare by requiring less 'money on the table.'</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb145-6"><a href="#cb145-6" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb145-7"><a href="#cb145-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"- STRUCTURE EFFECT ("</span>, <span class="fu">round</span>(avg_structure, <span class="dv">4</span>), <span class="st">"): The market PRICES IPOs differently post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb145-8"><a href="#cb145-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  For the same level of fact-intensity, post-Omnicare IPOs have MORE underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb145-9"><a href="#cb145-9" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb164"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb164-1"><a href="#cb164-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Structure effect interpretation</span></span>
+<span id="cb164-2"><a href="#cb164-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (avg_structure <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
+<span id="cb164-3"><a href="#cb164-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"- STRUCTURE EFFECT ("</span>, <span class="fu">round</span>(avg_structure, <span class="dv">4</span>), <span class="st">"): The market PRICES IPOs differently post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb164-4"><a href="#cb164-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  For the same level of fact-intensity, post-Omnicare IPOs have LESS underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb164-5"><a href="#cb164-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  This suggests the market reacted to Omnicare by requiring less 'money on the table.'</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb164-6"><a href="#cb164-6" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb164-7"><a href="#cb164-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"- STRUCTURE EFFECT ("</span>, <span class="fu">round</span>(avg_structure, <span class="dv">4</span>), <span class="st">"): The market PRICES IPOs differently post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb164-8"><a href="#cb164-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  For the same level of fact-intensity, post-Omnicare IPOs have MORE underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb164-9"><a href="#cb164-9" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>- STRUCTURE EFFECT ( -0.0216 ): The market PRICES IPOs differently post-Omnicare.
@@ -2611,31 +2740,41 @@ DECOMPOSITION:</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb147"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb147-1"><a href="#cb147-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Composition effect interpretation</span></span>
-<span id="cb147-2"><a href="#cb147-2" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (avg_composition <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
-<span id="cb147-3"><a href="#cb147-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">- COMPOSITION EFFECT ("</span>, <span class="fu">round</span>(avg_composition, <span class="dv">4</span>), <span class="st">"): The distribution of rf_fact SHIFTED post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb147-4"><a href="#cb147-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  Given the same pricing structure, changes in fact-intensity would have led to LESS underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb147-5"><a href="#cb147-5" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb147-6"><a href="#cb147-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">- COMPOSITION EFFECT ("</span>, <span class="fu">round</span>(avg_composition, <span class="dv">4</span>), <span class="st">"): The distribution of rf_fact SHIFTED post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb147-7"><a href="#cb147-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  Given the same pricing structure, changes in fact-intensity would have led to MORE underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb147-8"><a href="#cb147-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  This is consistent with firms shifting toward more opinion-based language post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb147-9"><a href="#cb147-9" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb166"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb166-1"><a href="#cb166-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Composition effect interpretation - use actual data to determine direction</span></span>
+<span id="cb166-2"><a href="#cb166-2" aria-hidden="true" tabindex="-1"></a>rf_pre_mean <span class="ot">&lt;-</span> <span class="fu">mean</span>(df[<span class="sc">!</span>df<span class="sc">$</span>post_omnicare, <span class="st">"rf_fact_t07"</span>], <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb166-3"><a href="#cb166-3" aria-hidden="true" tabindex="-1"></a>rf_post_mean <span class="ot">&lt;-</span> <span class="fu">mean</span>(df[df<span class="sc">$</span>post_omnicare, <span class="st">"rf_fact_t07"</span>], <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb166-4"><a href="#cb166-4" aria-hidden="true" tabindex="-1"></a>rf_shift_direction <span class="ot">&lt;-</span> <span class="fu">ifelse</span>(rf_post_mean <span class="sc">&gt;</span> rf_pre_mean, <span class="st">"increased (more facts)"</span>, <span class="st">"decreased (fewer facts)"</span>)</span>
+<span id="cb166-5"><a href="#cb166-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb166-6"><a href="#cb166-6" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (avg_composition <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
+<span id="cb166-7"><a href="#cb166-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">- COMPOSITION EFFECT ("</span>, <span class="fu">round</span>(avg_composition, <span class="dv">4</span>), <span class="st">"): The distribution of rf_fact SHIFTED post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb166-8"><a href="#cb166-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  Given the same pricing structure, changes in fact-intensity would have led to LESS underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb166-9"><a href="#cb166-9" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb166-10"><a href="#cb166-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">- COMPOSITION EFFECT ("</span>, <span class="fu">round</span>(avg_composition, <span class="dv">4</span>), <span class="st">"): The distribution of rf_fact SHIFTED post-Omnicare.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb166-11"><a href="#cb166-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="st">"  Given the same pricing structure, changes in fact-intensity would have led to MORE underpricing.</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb166-12"><a href="#cb166-12" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>
 - COMPOSITION EFFECT ( -0.0184 ): The distribution of rf_fact SHIFTED post-Omnicare.
-  Given the same pricing structure, changes in fact-intensity would have led to MORE underpricing.
-  This is consistent with firms shifting toward more opinion-based language post-Omnicare.</code></pre>
+  Given the same pricing structure, changes in fact-intensity would have led to MORE underpricing.</code></pre>
 </div>
 <details class="code-fold">
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb149"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb149-1"><a href="#cb149-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Relative contributions</span></span>
-<span id="cb149-2"><a href="#cb149-2" aria-hidden="true" tabindex="-1"></a>total_abs <span class="ot">&lt;-</span> <span class="fu">abs</span>(avg_structure) <span class="sc">+</span> <span class="fu">abs</span>(avg_composition)</span>
-<span id="cb149-3"><a href="#cb149-3" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (total_abs <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
-<span id="cb149-4"><a href="#cb149-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">RELATIVE CONTRIBUTIONS:</span><span class="sc">\n</span><span class="st">"</span>))</span>
-<span id="cb149-5"><a href="#cb149-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Structure effect: %.1f%% of total absolute change</span><span class="sc">\n</span><span class="st">"</span>, <span class="dv">100</span> <span class="sc">*</span> <span class="fu">abs</span>(avg_structure) <span class="sc">/</span> total_abs))</span>
-<span id="cb149-6"><a href="#cb149-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Composition effect: %.1f%% of total absolute change</span><span class="sc">\n</span><span class="st">"</span>, <span class="dv">100</span> <span class="sc">*</span> <span class="fu">abs</span>(avg_composition) <span class="sc">/</span> total_abs))</span>
-<span id="cb149-7"><a href="#cb149-7" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb168"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb168-1"><a href="#cb168-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Fact: rf_fact %s post-Omnicare (pre mean: %.4f, post mean: %.4f)</span><span class="sc">\n</span><span class="st">"</span>,</span>
+<span id="cb168-2"><a href="#cb168-2" aria-hidden="true" tabindex="-1"></a>            rf_shift_direction, rf_pre_mean, rf_post_mean))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Fact: rf_fact decreased (fewer facts) post-Omnicare (pre mean: 0.5274, post mean: 0.4980)</code></pre>
+</div>
+<details class="code-fold">
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb170"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb170-1"><a href="#cb170-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Relative contributions</span></span>
+<span id="cb170-2"><a href="#cb170-2" aria-hidden="true" tabindex="-1"></a>total_abs <span class="ot">&lt;-</span> <span class="fu">abs</span>(avg_structure) <span class="sc">+</span> <span class="fu">abs</span>(avg_composition)</span>
+<span id="cb170-3"><a href="#cb170-3" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (total_abs <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
+<span id="cb170-4"><a href="#cb170-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">RELATIVE CONTRIBUTIONS:</span><span class="sc">\n</span><span class="st">"</span>))</span>
+<span id="cb170-5"><a href="#cb170-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Structure effect: %.1f%% of total absolute change</span><span class="sc">\n</span><span class="st">"</span>, <span class="dv">100</span> <span class="sc">*</span> <span class="fu">abs</span>(avg_structure) <span class="sc">/</span> total_abs))</span>
+<span id="cb170-6"><a href="#cb170-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">cat</span>(<span class="fu">sprintf</span>(<span class="st">"  Composition effect: %.1f%% of total absolute change</span><span class="sc">\n</span><span class="st">"</span>, <span class="dv">100</span> <span class="sc">*</span> <span class="fu">abs</span>(avg_composition) <span class="sc">/</span> total_abs))</span>
+<span id="cb170-7"><a href="#cb170-7" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-stdout">
 <pre><code>
